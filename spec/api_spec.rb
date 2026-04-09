@@ -14,7 +14,7 @@ def app
   FinanceTracker::Api
 end
 
-DATA = YAML.safe_load_file('app/db/seeds/transaction_seed.yml')
+DATA = YAML.safe_load_file('db/seeds/transaction_seed.yml')
 
 describe 'Test FinanceTracker Web API' do
   include Rack::Test::Methods
