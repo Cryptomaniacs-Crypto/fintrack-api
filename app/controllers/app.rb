@@ -4,7 +4,7 @@ require 'roda'
 require 'json'
 require 'logger'
 
-require_relative '../transactions'
+require_relative '../models/transaction'
 
 module FinanceTracker
     class Api < Roda
@@ -13,7 +13,7 @@ module FinanceTracker
         plugin :common_logger, $stderr
 
         configure do
-            Transactions.setup
+            Transaction.setup
         end
 
         route do |routing|
@@ -30,7 +30,7 @@ module FinanceTracker
                         # GET /api/v1/transactions/[id]
                         routing.get String do |id|
                             response.status = 200
-                            Transactions.find(id).to_json
+                            Transaction.find(id).to_json
                         rescue StandardError
                             routing.halt 404, { message: 'Transaction not found'}.to_json
                         end
@@ -38,18 +38,18 @@ module FinanceTracker
                         # GET api/v1/transactions
                         routing.get do
                             response.status = 200
-                            output = { transaction_ids: Transactions.all }
+                            output = { transaction_ids: Transaction.all }
                             JSON.pretty_generate(output)
                         end
 
                         # POST api/v1/transactions
                         routing.post do
                             new_data = JSON.parse(routing.body.read)
-                            new_transaction = Transactions.new(new_data)
+                            new_info = Transaction.new(new_data)
 
-                            if new_transaction.save
+                            if new_info.save
                                 response.status = 201
-                                { message: 'Transaction saved successfully', id: new_transaction.id }.to_json 
+                                { message: 'Transaction saved successfully', id: new_info.id }.to_json 
                             else
                                 routing.halt 400, { message: 'Could not save transaction records' }.to_json
                             end
