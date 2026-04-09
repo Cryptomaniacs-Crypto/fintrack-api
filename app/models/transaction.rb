@@ -1,8 +1,9 @@
 require 'securerandom'
 require 'json'
+require 'fileutils'
 
 module FinanceTracker
-    STORE_DIR = 'app/db/store'
+    STORE_DIR = 'db/local'
     class Transaction
         attr_reader :id, :amount, :date, :title
 
@@ -11,6 +12,10 @@ module FinanceTracker
             @amount = new_info['amount']
             @date = new_info['date']
             @title = new_info['title']
+        end
+
+        def self.setup
+            FileUtils.mkdir_p(STORE_DIR)
         end
 
         def new_id
