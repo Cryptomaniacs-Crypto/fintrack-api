@@ -18,6 +18,7 @@ DATA = YAML.safe_load_file('db/seeds/transaction_seed.yml')
 
 describe 'Test FinanceTracker Web API' do
   include Rack::Test::Methods
+
   before do
     Dir.glob("#{FinanceTracker::STORE_DIR}/*.txt").each { |filename| FileUtils.rm(filename) }
   end
