@@ -21,8 +21,7 @@ module FinanceTracker
             attributes: {
               id:,
               name:,
-              amount:,
-              description:
+              balance:
             }
           },
           included: {
