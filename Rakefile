@@ -56,7 +56,7 @@ namespace :db do
   desc 'Run migrations'
   task migrate: %i[load print_env] do
     puts 'Migrating database to latest'
-    Sequel::Migrator.run(@app.DB, 'db/migrations')
+    Sequel::Migrator.run(@app.DB, 'app/db/migrations')
   end
 
   desc 'Destroy data in database; maintain tables'
@@ -73,7 +73,7 @@ namespace :db do
       return
     end
 
-    db_filename = "db/local/#{FinanceTracker::Api.environment}.db"
+    db_filename = "app/db/#{FinanceTracker::Api.environment}.db"
     FileUtils.rm(db_filename)
     puts "Deleted #{db_filename}"
   end

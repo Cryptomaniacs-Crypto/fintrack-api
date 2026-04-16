@@ -23,3 +23,9 @@ gem 'pry'
 gem 'rerun'
 gem 'rubocop'
 gem 'rubocop-minitest'
+
+# Database
+gem 'sequel'
+gem 'sqlite3'
+gem 'rake'
+gem 'figaro'

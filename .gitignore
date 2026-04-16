@@ -9,6 +9,4 @@ CLAUDE.local.md
 _*
 
 # Local data store
-db/local/*
-
-app/db/store/*
+app/db/*.db
