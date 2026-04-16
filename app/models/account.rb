@@ -4,13 +4,11 @@ require 'json'
 require 'sequel'
 
 module FinanceTracker
-  # Models a financial transaction
-  class Transaction < Sequel::Model
-    one_to_many :accounts
+  # Models an account entry linked to a transaction
+  class Account < Sequel::Model
+    many_to_one :transaction
     one_to_many :categories
-    plugin :association_dependencies,
-           accounts: :destroy,
-           categories: :destroy
+    plugin :association_dependencies, categories: :nullify
 
     plugin :timestamps
 
@@ -19,13 +17,16 @@ module FinanceTracker
       JSON(
         {
           data: {
-            type: 'transaction',
+            type: 'account',
             attributes: {
               id:,
-              title:,
+              name:,
               amount:,
-              date:
+              description:
             }
+          },
+          included: {
+            transaction:
           }
         }, options
       )
