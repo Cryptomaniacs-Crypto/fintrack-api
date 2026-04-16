@@ -25,20 +25,6 @@ Install this API by cloning the repository and using bundler to install gems fro
 bundle install
 ```
 
-Create `config/secrets.yml` from this template:
-
-```yml
----
-development:
-  DATABASE_URL: sqlite://db/local/development.db
-
-test:
-  DATABASE_URL: sqlite://db/local/test.db
-
-production:
-  DATABASE_URL: <do not set - assigned by production service>
-```
-
 Setup development database once:
 
 ```shell
