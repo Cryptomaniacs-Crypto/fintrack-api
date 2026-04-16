@@ -54,7 +54,7 @@ module FinanceTracker
                 if new_account
                   response.status = 201
                   response['Location'] = "#{@account_route}/#{new_account.id}"
-                  { message: 'Account saved', data: new_account }.to_json
+                  new_account.to_json  # eturn new_account.to_json directly
                 else
                   routing.halt 400, { message: 'Could not save account' }.to_json
                 end
@@ -91,7 +91,7 @@ module FinanceTracker
                 if new_category
                   response.status = 201
                   response['Location'] = "#{@category_route}/#{new_category.id}"
-                  { message: 'Category saved', data: new_category }.to_json
+                  new_category.to_json  # <-- just return this directly
                 else
                   routing.halt 400, { message: 'Could not save category' }.to_json
                 end
@@ -125,7 +125,7 @@ module FinanceTracker
 
             response.status = 201
             response['Location'] = "#{@transaction_route}/#{new_transaction.id}"
-            { message: 'Transaction saved', data: new_transaction }.to_json
+            new_transaction.to_json
           rescue StandardError => e
             routing.halt 400, { message: e.message }.to_json
           end

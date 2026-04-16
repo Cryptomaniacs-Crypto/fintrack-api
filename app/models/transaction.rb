@@ -24,7 +24,7 @@ module FinanceTracker
               id:,
               title:,
               amount:,
-              date:
+              transaction_date:
             }
           }
         }, options
