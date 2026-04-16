@@ -4,10 +4,11 @@ require 'json'
 require 'sequel'
 
 module FinanceTracker
-  # Models a transaction category
+  # Models a category entry linked to an account and transaction
   class Category < Sequel::Model
-    many_to_one :transaction
     many_to_one :account
+    many_to_one :transaction
+    plugin :association_dependencies
 
     plugin :timestamps
 
@@ -24,8 +25,8 @@ module FinanceTracker
             }
           },
           included: {
-            transaction:,
-            account:
+            account:,
+            transaction:
           }
         }, options
       )
