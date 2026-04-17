@@ -1,12 +1,15 @@
 # AI tooling
-CLAUDE.local.md
-.claude/*
-!.claude/CLAUDE.md
-!.claude/settings.json
-!.claude/skills/
+GITHUB.local.md
+.github/*
+!.github/copilot-instructions.md
 
 # Temp files
 _*
+.bundle
+.irb_history
 
 # Local data store
-app/db/*.db
+db/local/*
+
+# Secrets
+config/secrets.yml
