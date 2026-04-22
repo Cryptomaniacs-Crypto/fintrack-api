@@ -20,7 +20,7 @@ module FinanceTracker
             attributes: {
               id:,
               name:,
-              account_number: account_number
+              account_number:,
               balance:
             }
           },
