@@ -1,7 +1,7 @@
 - title: "Lunch"
   amount: 10
-  date: "2026-04-09"
+  transaction_date: "2026-04-09"
 
 - title: "Movie"
   amount: 15
-  date: "2026-04-08"
+  transaction_date: "2026-04-08"

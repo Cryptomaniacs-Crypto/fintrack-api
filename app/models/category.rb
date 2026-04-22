@@ -18,7 +18,8 @@ module FinanceTracker
             type: 'category',
             attributes: {
               id:,
-              name:
+              name:,
+              description:
             }
           },
           included: {
