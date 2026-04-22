@@ -8,7 +8,8 @@ Sequel.migration do
       primary_key :id
 
       String :name, null: false
-      Float :balance, null: false, default: 0.0
+      String  :account_number
+      Numeric :balance, size: [12, 2], null: false, default: 0
       
       DateTime :created_at
       DateTime :updated_at

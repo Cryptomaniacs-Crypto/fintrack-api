@@ -6,9 +6,8 @@ require 'sequel'
 module FinanceTracker
   # Models a transaction category
   class Category < Sequel::Model
-    many_to_one :transaction
-    many_to_one :account
-
+    one_to_many :transactions
+    plugin :association_dependencies, transactions: :nullify
     plugin :timestamps
 
     # rubocop:disable Metrics/MethodLength
@@ -19,13 +18,11 @@ module FinanceTracker
             type: 'category',
             attributes: {
               id:,
-              name:,
-              description:
+              name:
             }
           },
           included: {
-            transaction:,
-            account:
+            transactions:
           }
         }, options
       )

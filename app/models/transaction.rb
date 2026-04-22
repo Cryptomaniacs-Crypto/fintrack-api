@@ -6,11 +6,8 @@ require 'sequel'
 module FinanceTracker
   # Models a financial transaction
   class Transaction < Sequel::Model
-    one_to_many :accounts
-    one_to_many :categories
-    plugin :association_dependencies,
-           accounts: :destroy,
-           categories: :destroy
+    many_to_one :account
+    many_to_one :category
 
     plugin :timestamps
 
@@ -24,7 +21,8 @@ module FinanceTracker
               id:,
               title:,
               amount:,
-              date:
+              transaction_date:,
+              note:
             }
           }
         }, options

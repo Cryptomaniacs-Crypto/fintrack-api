@@ -6,9 +6,8 @@ require 'sequel'
 module FinanceTracker
   # Models an account entry linked to a transaction
   class Account < Sequel::Model
-    many_to_one :transaction
-    one_to_many :categories
-    plugin :association_dependencies, categories: :nullify
+    one_to_many :transactions
+    plugin :association_dependencies, transactions: :nullify
 
     plugin :timestamps
 
@@ -21,11 +20,12 @@ module FinanceTracker
             attributes: {
               id:,
               name:,
+              account_number: account_number
               balance:
             }
           },
           included: {
-            transaction:
+            transactions:
           }
         }, options
       )

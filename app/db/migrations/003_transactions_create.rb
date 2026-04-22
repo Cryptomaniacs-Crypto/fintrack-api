@@ -8,10 +8,10 @@ Sequel.migration do
       primary_key :id
 
       foreign_key :account_id, :accounts, null: false, on_delete: :cascade
-      foreign_key :category_id, :categories, null: false, on_delete: :cascade
+      foreign_key :category_id, :categories, null: true, on_delete: :set_null
 
       String :title, null: false
-      Float :amount, null: false
+      Numeric :amount, size: [12, 2], null: false
       Date :transaction_date, null: false
       String :note
 
