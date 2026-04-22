@@ -9,13 +9,11 @@ describe 'Test Category Handling' do
     wipe_database
   end
 
-  it 'HAPPY: should be able to get list of all categories for a transaction' do
-    # transaction = FinanceTracker::Transaction.create(DATA[:transactions][0]).save_changes
-    transaction = FinanceTracker::Transaction.create(DATA[:transactions][0])
-    transaction.add_category(DATA[:categories][0])
-    transaction.add_category(DATA[:categories][1])
+  it 'HAPPY: should be able to get list of all categories' do
+    FinanceTracker::Category.create(DATA[:categories][0])
+    FinanceTracker::Category.create(DATA[:categories][1])
 
-    get "api/v1/transactions/#{transaction.id}/categories"
+    get 'api/v1/categories'
     _(last_response.status).must_equal 200
 
     result = JSON.parse last_response.body
@@ -23,38 +21,46 @@ describe 'Test Category Handling' do
   end
 
   it 'HAPPY: should be able to get details of a single category' do
-    # transaction = FinanceTracker::Transaction.create(DATA[:transactions][0]).save_changes
-    transaction = FinanceTracker::Transaction.create(DATA[:transactions][0])
-    transaction.add_category(DATA[:categories][0])
-    category = FinanceTracker::Category.first
+    category = FinanceTracker::Category.create(DATA[:categories][0])
 
-    get "/api/v1/transactions/#{transaction.id}/categories/#{category.id}"
+    get "/api/v1/categories/#{category.id}"
     _(last_response.status).must_equal 200
 
     result = JSON.parse last_response.body
-    _(result['data']['attributes']['id']).must_equal category.id
     _(result['data']['attributes']['name']).must_equal DATA[:categories][0]['name']
+    _(result['data']['attributes']['description']).must_equal DATA[:categories][0]['description']
   end
 
   it 'SAD: should return error if unknown category requested' do
-    # transaction = FinanceTracker::Transaction.create(DATA[:transactions][0]).save_changes
-    transaction = FinanceTracker::Transaction.create(DATA[:transactions][0])
-
-    get "/api/v1/transactions/#{transaction.id}/categories/foobar"
+    get '/api/v1/categories/foobar'
     _(last_response.status).must_equal 404
   end
 
-  it 'HAPPY: should be able to create new category for a transaction' do
-    # transaction = FinanceTracker::Transaction.create(DATA[:transactions][0]).save_changes
-    transaction = FinanceTracker::Transaction.create(DATA[:transactions][0])
+  it 'HAPPY: should be able to create new category' do
     existing = DATA[:categories][0]
 
     req_header = { 'CONTENT_TYPE' => 'application/json' }
-    post "api/v1/transactions/#{transaction.id}/categories", existing.to_json, req_header
-    _(last_response.status).must_equal 201
+    post 'api/v1/categories', existing.to_json, req_header
+    _(last_response.status).must_equal 201, last_response.body
     _(last_response.headers['Location'].size).must_be :>, 0
 
     created = JSON.parse(last_response.body)['data']['attributes']
     _(created['name']).must_equal existing['name']
+    _(created['description']).must_equal existing['description']
+  end
+
+  it 'HAPPY: should be able to get category for a transaction' do
+    # account MUST be created first
+    account = FinanceTracker::Account.create(DATA[:accounts][0])
+    category = FinanceTracker::Category.create(DATA[:categories][0])
+    transaction = FinanceTracker::Transaction.create(
+      DATA[:transactions][0].merge(account_id: account.id, category_id: category.id)
+    )
+
+    get "/api/v1/transactions/#{transaction.id}/category"
+    _(last_response.status).must_equal 200
+
+    result = JSON.parse last_response.body
+    _(result['data']['attributes']['name']).must_equal DATA[:categories][0]['name']
   end
 end

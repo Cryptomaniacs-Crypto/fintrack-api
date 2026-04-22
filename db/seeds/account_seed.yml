@@ -1,7 +1,7 @@
 - name: "Cash Wallet"
-  amount: 500
-  description: "Physical cash on hand"
+  account_number:
+  balance: 500
 
 - name: "Bank Account"
-  amount: 3000
-  description: "Main checking account"
+  account_number: 
+  balance: 3000
