@@ -9,6 +9,7 @@ module FinanceTracker
     many_to_one :account
     many_to_one :category
 
+    plugin :uuid, field: :id
     plugin :timestamps
 
     # rubocop:disable Metrics/MethodLength

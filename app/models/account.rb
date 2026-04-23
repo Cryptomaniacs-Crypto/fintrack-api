@@ -9,6 +9,7 @@ module FinanceTracker
     one_to_many :transactions
     plugin :association_dependencies, transactions: :nullify
 
+    plugin :uuid, field: :id
     plugin :timestamps
 
     # rubocop:disable Metrics/MethodLength
