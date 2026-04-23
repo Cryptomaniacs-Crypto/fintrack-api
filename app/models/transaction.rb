@@ -15,6 +15,25 @@ module FinanceTracker
     plugin :whitelist_security
     set_allowed_columns :title, :transaction_date, :note, :account_id, :category_id
 
+    class << self
+      def create(values = nil, &block)
+        return super unless values.is_a?(Hash)
+
+        secure_values = {}
+        regular_values = values.dup
+        if regular_values.key?(:amount)
+          secure_values[:amount] = regular_values.delete(:amount)
+        elsif regular_values.key?('amount')
+          secure_values[:amount] = regular_values.delete('amount')
+        end
+
+        transaction = new(regular_values, &block)
+        transaction.amount = secure_values[:amount] if secure_values.key?(:amount) && !secure_values[:amount].nil?
+        transaction.save
+        transaction
+      end
+    end
+
     # Secure getter and setter
     def amount
       SecureDB.decrypt(amount_secure)

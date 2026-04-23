@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'spec_helper'
+require_relative '../spec_helper'
 
 describe 'Test Account Handling' do
   include Rack::Test::Methods
@@ -44,15 +44,14 @@ describe 'Test Account Handling' do
     _(last_response.status).must_equal 201
     _(last_response.headers['Location'].size).must_be :>, 0
 
-    created = JSON.parse(last_response.body)['data']['attributes']
+    created = JSON.parse(last_response.body)['data']['data']['attributes']
     _(created['name']).must_equal existing['name']
     _(created['balance'].to_f).must_equal existing['balance'].to_f
   end
 
   it 'HAPPY: should retrieve correct data from database' do
     account_data = DATA[:accounts][1]
-    account = FinanceTracker::Account.first
-    new_account = account.add_account(account_data)
+    new_account = FinanceTracker::Account.create(account_data)
 
     account = FinanceTracker::Account.find(id:new_account.id)
     _(account.name).must_equal account_data['name']
@@ -61,8 +60,7 @@ describe 'Test Account Handling' do
 
   it 'SECURITY: should not use deterministic integers as ID' do
     account_data = DATA[:accounts][1]
-    account = FinanceTracker::Account.first
-    new_account = account.add_account(account_data)
+    new_account = FinanceTracker::Account.create(account_data)
     _(new_account.id.is_a?(Numeric)).must_equal false
   end
 end

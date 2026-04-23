@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'spec_helper'
+require_relative '../spec_helper'
 
 describe 'Test Category Handling' do
   include Rack::Test::Methods
@@ -44,7 +44,7 @@ describe 'Test Category Handling' do
     _(last_response.status).must_equal 201, last_response.body
     _(last_response.headers['Location'].size).must_be :>, 0
 
-    created = JSON.parse(last_response.body)['data']['attributes']
+    created = JSON.parse(last_response.body)['data']['data']['attributes']
     _(created['name']).must_equal existing['name']
     _(created['description']).must_equal existing['description']
   end
@@ -66,13 +66,10 @@ describe 'Test Category Handling' do
 
   it 'HAPPY: should retrieve correct data from database' do
     category_data = DATA[:categories][1]
-    category = FinanceTracker::Category.first
-    new_category = category.add_category(category_data)
+    new_category = FinanceTracker::Category.create(category_data)
 
     category = FinanceTracker::Category.find(id:new_category.id)
     _(category.name).must_equal category_data['name']
     _(category.description).must_equal category_data['description']
   end
-
-  it 'SECURITY: should secure'
 end

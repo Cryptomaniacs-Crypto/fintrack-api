@@ -15,6 +15,31 @@ module FinanceTracker
     plugin :whitelist_security
     set_allowed_columns :name
 
+    class << self
+      def create(values = nil, &block)
+        return super unless values.is_a?(Hash)
+
+        secure_values = {}
+        regular_values = values.dup
+
+        if regular_values.key?(:account_number)
+          secure_values[:account_number] = regular_values.delete(:account_number)
+        elsif regular_values.key?('account_number')
+          secure_values[:account_number] = regular_values.delete('account_number')
+        end
+        if regular_values.key?(:balance)
+          secure_values[:balance] = regular_values.delete(:balance)
+        elsif regular_values.key?('balance')
+          secure_values[:balance] = regular_values.delete('balance')
+        end
+
+        account = new(regular_values, &block)
+        secure_values.each { |key, value| account.public_send("#{key}=", value) unless value.nil? }
+        account.save
+        account
+      end
+    end
+
     # Secure getters and setters
     def account_number
       SecureDB.decrypt(account_number_secure)

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'spec_helper'
+require_relative '../spec_helper'
 
 describe 'Test Transaction Handling' do
   include Rack::Test::Methods
@@ -11,8 +11,9 @@ describe 'Test Transaction Handling' do
 
   describe 'Getting transactions' do
     it 'HAPPY: should be able to get list of all transactions' do
-      FinanceTracker::Transaction.create(DATA[:transactions][0]).save_changes
-      FinanceTracker::Transaction.create(DATA[:transactions][1]).save_changes
+      account = FinanceTracker::Account.create(DATA[:accounts][0])
+      FinanceTracker::Transaction.create(DATA[:transactions][0].merge(account_id: account.id)).save_changes
+      FinanceTracker::Transaction.create(DATA[:transactions][1].merge(account_id: account.id)).save_changes
 
       get 'api/v1/transactions'
       _(last_response.status).must_equal 200
@@ -23,7 +24,8 @@ describe 'Test Transaction Handling' do
 
     it 'HAPPY: should be able to get details of a single transaction' do
       existing_transaction = DATA[:transactions][1]
-      FinanceTracker::Transaction.create(existing_transaction).save_changes
+      account = FinanceTracker::Account.create(DATA[:accounts][0])
+      FinanceTracker::Transaction.create(existing_transaction.merge(account_id: account.id)).save_changes
       id = FinanceTracker::Transaction.first.id
 
       get "/api/v1/transactions/#{id}"
@@ -41,8 +43,13 @@ describe 'Test Transaction Handling' do
     end
 
     it 'SECURITY: should prevent basic SQL injection targeting IDs' do
-      FinanceTracker::Transaction.create(title: 'First Transaction')
-      FinanceTracker::Transaction.create(title: 'Second Transaction')
+      account = FinanceTracker::Account.create(DATA[:accounts][0])
+      FinanceTracker::Transaction.create(
+        DATA[:transactions][0].merge(account_id: account.id, title: 'First Transaction')
+      )
+      FinanceTracker::Transaction.create(
+        DATA[:transactions][1].merge(account_id: account.id, title: 'Second Transaction')
+      )
       get 'api/v1/transactions/2%20or%20id%3E'
 
       # deliberately not reporting error -- don't give attacker information
@@ -60,9 +67,11 @@ describe 'Test Transaction Handling' do
 
     it 'HAPPY: should be able to create new transactions' do
       existing_transaction = DATA[:transactions][1]
+      account = FinanceTracker::Account.create(DATA[:accounts][0])
+      payload = existing_transaction.merge(account_id: account.id)
 
       req_header = { 'CONTENT_TYPE' => 'application/json' }
-      post 'api/v1/transactions', existing_transaction.to_json, req_header
+      post 'api/v1/transactions', payload.to_json, req_header
       _(last_response.status).must_equal 201
       _(last_response.headers['Location'].size).must_be :>, 0
 
@@ -75,8 +84,10 @@ describe 'Test Transaction Handling' do
     end
 
     it 'SECURITY: should not create transaction with mass assignment' do
+      account = FinanceTracker::Account.create(DATA[:accounts][0])
       bad_data = @transaction_data.clone
       bad_data['created_at'] = '1900-01-01'
+      bad_data['account_id'] = account.id
       post 'api/v1/transactions', bad_data.to_json, @req_header
       _(last_response.status).must_equal 400
       _(last_response.headers['Location']).must_be_nil

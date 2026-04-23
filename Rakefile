@@ -15,12 +15,12 @@ end
 
 desc 'Tests API specs only'
 task :api_spec do
-  sh 'ruby spec/api_spec.rb'
+  sh 'ruby spec/integration/api_spec.rb'
 end
 
 desc 'Test all the specs'
 Rake::TestTask.new(:spec) do |t|
-  t.pattern = 'spec/*_spec.rb'
+  t.pattern = 'spec/**/*_spec.rb'
   t.warning = false
 end
 
