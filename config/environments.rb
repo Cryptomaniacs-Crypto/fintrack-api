@@ -26,7 +26,7 @@ module FinanceTracker
       def self.DB = DB
       
       # Load crypto keys
-      SecureDB.setup(ENV.delete('DB_KEY'))
+      SecureDB.setup(ENV.delete('SECURE_DB_KEY'))
 
       # Custom events logging
       LOGGER = Logger.new($stderr)
