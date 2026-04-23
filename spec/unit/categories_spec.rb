@@ -63,4 +63,16 @@ describe 'Test Category Handling' do
     result = JSON.parse last_response.body
     _(result['data']['attributes']['name']).must_equal DATA[:categories][0]['name']
   end
+
+  it 'HAPPY: should retrieve correct data from database' do
+    category_data = DATA[:categories][1]
+    category = FinanceTracker::Category.first
+    new_category = category.add_category(category_data)
+
+    category = FinanceTracker::Category.find(id:new_category.id)
+    _(category.name).must_equal category_data['name']
+    _(category.description).must_equal category_data['description']
+  end
+
+  it 'SECURITY: should secure'
 end

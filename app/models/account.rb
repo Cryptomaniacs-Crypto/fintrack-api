@@ -11,6 +11,8 @@ module FinanceTracker
     plugin :association_dependencies, transactions: :nullify
 
     plugin :timestamps
+    plugin :whitelist_security
+    set_allowed_columns :name
 
     # Secure getters and setters
     def account_number
