@@ -2,8 +2,16 @@
 
 require 'rake/testtask'
 require './require_app'
+require_relative './app/lib/secure_db'
 
 task default: :spec
+
+namespace :newkey do
+  desc 'Create sample cryptographic key for database'
+  task :db do
+    puts "DB_KEY: #{FinanceTracker::SecureDB.generate_key}"
+  end
+end
 
 desc 'Tests API specs only'
 task :api_spec do

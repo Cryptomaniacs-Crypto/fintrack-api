@@ -2,6 +2,7 @@
 
 require 'json'
 require 'sequel'
+require_relative '../lib/secure_db'
 
 module FinanceTracker
   # Models a financial transaction
@@ -11,6 +12,17 @@ module FinanceTracker
 
     plugin :uuid, field: :id
     plugin :timestamps
+    plugin :whitelist_security
+    set_allowed_columns :title, :transaction_date, :note, :account_id, :category_id
+
+    # Secure getter and setter
+    def amount
+      SecureDB.decrypt(amount_secure)
+    end
+
+    def amount=(plaintext)
+      self.amount_secure = SecureDB.encrypt(plaintext)
+    end
 
     # rubocop:disable Metrics/MethodLength
     def to_json(options = {})

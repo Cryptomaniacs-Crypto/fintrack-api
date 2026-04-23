@@ -10,6 +10,9 @@ module FinanceTracker
     plugin :association_dependencies, transactions: :nullify
     plugin :timestamps
 
+    plugin :whitelist_security
+    set_allowed_columns :name, :description
+
     # rubocop:disable Metrics/MethodLength
     def to_json(options = {})
       JSON(
