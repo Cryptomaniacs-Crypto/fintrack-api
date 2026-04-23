@@ -12,7 +12,7 @@ module FinanceTracker
     # rubocop:disable Lint/ConstantDefinitionInBlock
     configure do
       # Load config secrets into local environment variables (ENV)
-      Figaro.aplication = Figaro::Application.new(
+      Figaro.application = Figaro::Application.new(
         environment: environment,
         path: File.expand_path('config/secrets.yml')
       )
