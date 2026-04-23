@@ -10,6 +10,7 @@ module FinanceTracker
     many_to_one :account
     many_to_one :category
 
+    plugin :uuid, field: :id
     plugin :timestamps
     plugin :whitelist_security
     set_allowed_columns :title, :transaction_date, :note, :account_id, :category_id

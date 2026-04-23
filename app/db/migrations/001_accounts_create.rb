@@ -5,7 +5,7 @@ require 'sequel'
 Sequel.migration do
   change do
     create_table(:accounts) do
-      primary_key :id
+      uuid :id, primary_key: true
 
       String :name, null: false
       String :account_number_secure

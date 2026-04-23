@@ -10,6 +10,7 @@ module FinanceTracker
     one_to_many :transactions
     plugin :association_dependencies, transactions: :nullify
 
+    plugin :uuid, field: :id
     plugin :timestamps
     plugin :whitelist_security
     set_allowed_columns :name

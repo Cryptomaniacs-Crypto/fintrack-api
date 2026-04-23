@@ -5,9 +5,9 @@ require 'sequel'
 Sequel.migration do
   change do
     create_table(:transactions) do
-      primary_key :id
+      uuid :id, primary_key: true
 
-      foreign_key :account_id, :accounts, null: false, on_delete: :cascade
+      foreign_key :account_id, :accounts, type: :uuid, null: false, on_delete: :cascade
       foreign_key :category_id, :categories, null: true, on_delete: :set_null
 
       String :title, null: false
