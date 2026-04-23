@@ -8,8 +8,8 @@ Sequel.migration do
       primary_key :id
 
       String :name, null: false
-      String  :account_number
-      Numeric :balance, size: [12, 2], null: false, default: 0
+      String :account_number_secure
+      String :balance_secure, null: false
       
       DateTime :created_at
       DateTime :updated_at

@@ -11,7 +11,7 @@ Sequel.migration do
       foreign_key :category_id, :categories, null: true, on_delete: :set_null
 
       String :title, null: false
-      Numeric :amount, size: [12, 2], null: false
+      String :amount_secure, null: false
       Date :transaction_date, null: false
       String :note
 

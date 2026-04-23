@@ -10,3 +10,5 @@ _*
 
 # Local data store
 app/db/*.db
+
+config/secrets.yml

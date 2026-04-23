@@ -3,6 +3,7 @@
 require 'roda'
 require 'figaro'
 require 'sequel'
+require_relative '../app/lib/secure_db'
 
 module FinanceTracker
   class Api < Roda
@@ -15,6 +16,8 @@ module FinanceTracker
     Figaro.load
 
     def self.config = Figaro.env
+
+    SecureDB.setup(config.SECURE_DB_KEY)
 
     db_url = ENV.delete('DATABASE_URL')
     DB = Sequel.connect("#{db_url}?encoding=utf8")
