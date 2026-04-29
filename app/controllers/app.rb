@@ -7,6 +7,8 @@ require_relative '../../config/environments'
 require_relative '../models/transaction'
 require_relative '../models/wallet'
 require_relative '../models/category'
+require_relative '../models/account'
+require_relative '../models/role'
 
 module FinanceTracker
   # Web controller for Finance Tracker API
@@ -22,6 +24,49 @@ module FinanceTracker
 
       @api_root = 'api/v1'
       routing.on @api_root do
+        routing.on 'accounts' do
+          @account_route = "#{@api_root}/accounts"
+
+          # GET api/v1/accounts/[username]
+          routing.get String do |username|
+            account = Account.first(username:)
+            account ? account.to_json : raise('Account not found')
+          rescue StandardError => e
+            routing.halt 404, { message: e.message }.to_json
+          end
+
+          # GET api/v1/accounts?email=... (search by email via HMAC hash)
+          routing.get do
+            email = routing.params['email']
+            routing.halt 400, { message: 'email query param required' }.to_json unless email
+
+            account = Account.first(email_hash: SecureDB.hash(email))
+            account ? account.to_json : routing.halt(404, { message: 'Account not found' }.to_json)
+          rescue StandardError => e
+            Api.logger.error "UNKNOWN ERROR: #{e.message}"
+            routing.halt 500, { message: 'Unknown server error' }.to_json
+          end
+
+          # POST api/v1/accounts
+          routing.post do
+            new_data = JSON.parse(routing.body.read)
+            new_account = Account.new(new_data)
+            raise('Could not save account') unless new_account.save_changes
+
+            response.status = 201
+            response['Location'] = "#{@account_route}/#{new_account.username}"
+            new_account.to_json
+          rescue Sequel::MassAssignmentRestriction
+            Api.logger.warn "MASS-ASSIGNMENT: #{new_data.keys}"
+            routing.halt 400, { message: 'Illegal Attributes' }.to_json
+          rescue Sequel::UniqueConstraintViolation
+            routing.halt 409, { message: 'Username or email already taken' }.to_json
+          rescue StandardError => e
+            Api.logger.error "UNKNOWN ERROR: #{e.message}"
+            routing.halt 500, { message: 'Unknown server error' }.to_json
+          end
+        end
+
         routing.on 'wallets' do
           @wallet_route = "#{@api_root}/wallets"
 

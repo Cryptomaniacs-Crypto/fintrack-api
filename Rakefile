@@ -7,9 +7,14 @@ require_relative './app/lib/secure_db'
 task default: :spec
 
 namespace :newkey do
-  desc 'Create sample cryptographic key for database'
+  desc 'Create sample cryptographic key for database encryption'
   task :db do
-    puts "DB_KEY: #{FinanceTracker::SecureDB.generate_key}"
+    puts "SECURE_DB_KEY: #{FinanceTracker::SecureDB.generate_key}"
+  end
+
+  desc 'Create sample cryptographic key for HMAC lookup hashing'
+  task :hash do
+    puts "SECURE_HASH_KEY: #{FinanceTracker::SecureDB.generate_key}"
   end
 end
 

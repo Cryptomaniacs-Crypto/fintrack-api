@@ -5,6 +5,9 @@ ENV['RACK_ENV'] = 'test'
 require_relative 'test_load_all'
 
 def wipe_database
+  FinanceTracker::Api.DB[:accounts_roles].delete  # join table
+  FinanceTracker::Account.dataset.delete
+  FinanceTracker::Role.dataset.delete
   FinanceTracker::Transaction.dataset.delete  # child (has wallet_id, category_id)
   FinanceTracker::Wallet.dataset.delete       # parent
   FinanceTracker::Category.dataset.delete     # parent

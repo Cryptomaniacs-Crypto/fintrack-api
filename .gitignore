@@ -12,3 +12,6 @@ SERVSEC_WORKPLAN.md
 app/db/*.db
 
 config/secrets.yml
+
+# Assignment spec PDFs (kept locally as reference)
+SEC Project*.pdf
