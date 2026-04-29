@@ -1,52 +1,76 @@
-require 'securerandom'
+# frozen_string_literal: true
+
 require 'json'
-require 'fileutils'
+require 'sequel'
+require_relative '../lib/secure_db'
 
 module FinanceTracker
-    STORE_DIR = 'db/local'
-    class Transaction
-        attr_reader :id, :amount, :date, :title
+  # Models a financial transaction
+  class Transaction < Sequel::Model
+    many_to_one :wallet
+    many_to_one :category
 
-        def initialize(new_info)
-            @id = new_info['id'] || new_id
-            @amount = new_info['amount']
-            @date = new_info['date']
-            @title = new_info['title']
+    plugin :uuid, field: :id
+    plugin :timestamps
+    plugin :whitelist_security
+    set_allowed_columns :title, :transaction_date, :note, :wallet_id, :category_id
+
+    class << self
+      def create(values = nil, &block)
+        return super unless values.is_a?(Hash)
+
+        secure_values = {}
+        regular_values = values.dup
+
+        %i[wallet_name category_name].each do |lookup_key|
+          regular_values.delete(lookup_key)
+          regular_values.delete(lookup_key.to_s)
         end
 
-        def self.setup
-            FileUtils.mkdir_p(STORE_DIR)
+        if regular_values.key?(:amount)
+          secure_values[:amount] = regular_values.delete(:amount)
+        elsif regular_values.key?('amount')
+          secure_values[:amount] = regular_values.delete('amount')
         end
 
-        def new_id
-            SecureRandom.uuid
+        if regular_values.key?(:wallet_id) || regular_values.key?('wallet_id')
+          wallet_id = regular_values[:wallet_id] || regular_values['wallet_id']
+          raise Sequel::ForeignKeyConstraintViolation, 'Wallet not found' unless Wallet.first(id: wallet_id)
         end
 
-        def to_json
-            JSON.generate({
-                'id' => @id,
-                'amount' => @amount,
-                'title' => @title,
-                'date' => @date
-            })
-        end
-
-        def save
-            File.write("#{STORE_DIR}/#{@id}.txt", to_json)
-        end
-
-        def self.find(id)
-           file_data = File.read("#{STORE_DIR}/#{id}.txt") 
-           Transaction.new(JSON.parse(file_data))
-        end
-
-        def self.all
-            Dir.glob("#{STORE_DIR}/*.txt").map do |file|
-                File.basename(file,'.txt')
-            end
-        end
-
-
+        transaction = new(regular_values, &block)
+        transaction.amount = secure_values[:amount] if secure_values.key?(:amount) && !secure_values[:amount].nil?
+        transaction.save
+        transaction
+      end
     end
-end
 
+    # Secure getter and setter
+    def amount
+      SecureDB.decrypt(amount_secure)
+    end
+
+    def amount=(plaintext)
+      self.amount_secure = SecureDB.encrypt(plaintext)
+    end
+
+    # rubocop:disable Metrics/MethodLength
+    def to_json(options = {})
+      JSON(
+        {
+          data: {
+            type: 'transaction',
+            attributes: {
+              id:,
+              title:,
+              amount:,
+              transaction_date:,
+              note:
+            }
+          }
+        }, options
+      )
+    end
+    # rubocop:enable Metrics/MethodLength
+  end
+end

@@ -1,0 +1,10 @@
+---
+- username: admin.user
+  email: admin@example.com
+  password: admin-password
+  avatar: admin.png
+
+- username: member.user
+  email: member@example.com
+  password: member-password
+  avatar: member.png

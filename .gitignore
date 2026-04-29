@@ -1,14 +1,23 @@
 # AI tooling
-CLAUDE.local.md
 .claude/*
-!.claude/CLAUDE.md
-!.claude/settings.json
-!.claude/skills/
 
 # Temp files
 _*
+.bundle
+.irb_history
+SERVSEC_WORKPLAN.md
+PROJECT_STATUS.md
+
+# Assignment spec PDFs (kept locally as reference)
+SEC Project*.pdf
+
 
 # Local data store
 db/local/*
 
-app/db/store/*
+# Secrets
+config/secrets.yml
+
+# Sideways tooling
+.swcopy
+.swsymlink

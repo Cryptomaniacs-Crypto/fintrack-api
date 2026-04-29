@@ -1,0 +1,9 @@
+---
+- username: admin.user
+  role_name: admin
+
+- username: admin.user
+  role_name: owner
+
+- username: member.user
+  role_name: member

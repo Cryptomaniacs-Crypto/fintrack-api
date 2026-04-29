@@ -1,0 +1,51 @@
+# frozen_string_literal: true
+require 'logger'
+
+require 'roda'
+require 'figaro'
+require 'sequel'
+require_relative '../app/lib/secure_db'
+
+module FinanceTracker
+  class Api < Roda
+    plugin :environments
+
+    # rubocop:disable Lint/ConstantDefinitionInBlock
+    configure do
+      # Load config secrets into local environment variables (ENV)
+      Figaro.application = Figaro::Application.new(
+        environment: environment,
+        path: File.expand_path('config/secrets.yml')
+      )
+      Figaro.load
+
+      def self.config = Figaro.env
+      
+      # Database Setup
+      db_url = ENV.delete('DATABASE_URL')
+      DB = Sequel.connect("#{db_url}?encoding=utf8")
+      def self.DB = DB
+      
+      # Load crypto keys
+      SecureDB.setup(ENV.delete('SECURE_DB_KEY'), ENV.delete('SECURE_HASH_KEY'))
+
+      # Custom events logging
+      LOGGER = Logger.new($stderr)
+      def self.logger = LOGGER
+    end
+    # rubocop:enable Lint/ConstantDefinitionInBlock
+
+    # HTTP Request Logging
+    configure :development, :production do
+      plugin :common_logger, $stderr
+    end
+
+    configure :development, :test do
+      require 'pry'
+    end
+
+    configure :test do
+      logger.level = Logger::ERROR
+    end
+  end
+end
