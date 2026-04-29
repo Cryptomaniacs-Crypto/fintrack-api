@@ -7,7 +7,7 @@ CLAUDE.local.md
 
 # Temp files
 _*
-
+SERVSEC_WORKPLAN.md
 # Local data store
 app/db/*.db
 
