@@ -5,7 +5,7 @@ require 'json'
 
 require_relative '../../config/environments'
 require_relative '../models/transaction'
-require_relative '../models/account'
+require_relative '../models/wallet'
 require_relative '../models/category'
 
 module FinanceTracker
@@ -22,32 +22,32 @@ module FinanceTracker
 
       @api_root = 'api/v1'
       routing.on @api_root do
-        routing.on 'accounts' do
-          @account_route = "#{@api_root}/accounts"
+        routing.on 'wallets' do
+          @wallet_route = "#{@api_root}/wallets"
 
-          # GET api/v1/accounts/[account_id]
-          routing.get String do |account_id|
-            account = Account.first(id: account_id)
-            account ? account.to_json : raise('Account not found')
+          # GET api/v1/wallets/[wallet_id]
+          routing.get String do |wallet_id|
+            wallet = Wallet.first(id: wallet_id)
+            wallet ? wallet.to_json : raise('Wallet not found')
           rescue StandardError => e
             routing.halt 404, { message: e.message }.to_json
           end
 
-          # GET api/v1/accounts
+          # GET api/v1/wallets
           routing.get do
-            { data: Account.all }.to_json
+            { data: Wallet.all }.to_json
           rescue StandardError
-            routing.halt 404, { message: 'Could not find accounts' }.to_json
+            routing.halt 404, { message: 'Could not find wallets' }.to_json
           end
 
-          # POST api/v1/accounts
+          # POST api/v1/wallets
           routing.post do
             new_data = JSON.parse(routing.body.read)
-            new_account = Account.create(new_data)
+            new_wallet = Wallet.create(new_data)
 
             response.status = 201
-            response['Location'] = "#{@account_route}/#{new_account.id}"
-            { message: 'Account saved', data: new_account }.to_json
+            response['Location'] = "#{@wallet_route}/#{new_wallet.id}"
+            { message: 'Wallet saved', data: new_wallet }.to_json
           rescue Sequel::MassAssignmentRestriction
             Api.logger.warn "MASS-ASSIGNMENT: #{new_data.keys}"
             routing.halt 400, { message: 'Illegal Attributes' }.to_json
@@ -97,12 +97,12 @@ module FinanceTracker
           @transaction_route = "#{@api_root}/transactions"
 
           routing.on String do |transaction_id|
-            routing.on 'account' do
-              # GET api/v1/transactions/[transaction_id]/account
+            routing.on 'wallet' do
+              # GET api/v1/transactions/[transaction_id]/wallet
               routing.get do
                 transaction = Transaction.first(id: transaction_id)
-                account = transaction&.account
-                account ? account.to_json : raise('Account not found')
+                wallet = transaction&.wallet
+                wallet ? wallet.to_json : raise('Wallet not found')
               rescue StandardError => e
                 routing.halt 404, { message: e.message }.to_json
               end
@@ -119,43 +119,43 @@ module FinanceTracker
               end
             end
 
-            routing.on 'accounts' do
-              @account_route = "#{@api_root}/transactions/#{transaction_id}/accounts"
+            routing.on 'wallets' do
+              @wallet_route = "#{@api_root}/transactions/#{transaction_id}/wallets"
 
-              # GET api/v1/transactions/[transaction_id]/accounts/[account_id]
-              routing.get String do |account_id|
+              # GET api/v1/transactions/[transaction_id]/wallets/[wallet_id]
+              routing.get String do |wallet_id|
                 transaction = Transaction.first(id: transaction_id)
-                account = transaction&.account
-                account = nil unless account&.id.to_s == account_id.to_s
-                account ? account.to_json : raise('Account not found')
+                wallet = transaction&.wallet
+                wallet = nil unless wallet&.id.to_s == wallet_id.to_s
+                wallet ? wallet.to_json : raise('Wallet not found')
               rescue StandardError => e
                 routing.halt 404, { message: e.message }.to_json
               end
 
-              # GET api/v1/transactions/[transaction_id]/accounts
+              # GET api/v1/transactions/[transaction_id]/wallets
               routing.get do
                 transaction = Transaction.first(id: transaction_id)
                 raise 'Transaction not found' unless transaction
 
-                output = { data: transaction.account ? [transaction.account] : [] }
+                output = { data: transaction.wallet ? [transaction.wallet] : [] }
                 JSON.pretty_generate(output)
               rescue StandardError
-                routing.halt 404, { message: 'Could not find accounts' }.to_json
+                routing.halt 404, { message: 'Could not find wallets' }.to_json
               end
 
-              # POST api/v1/transactions/[transaction_id]/accounts
+              # POST api/v1/transactions/[transaction_id]/wallets
               routing.post do
                 new_data = JSON.parse(routing.body.read)
                 transaction = Transaction.first(id: transaction_id)
                 raise 'Transaction not found' unless transaction
 
-                new_account = Account.create(new_data)
-                transaction.update(account_id: new_account.id)
-                raise 'Could not save event' unless new_account
+                new_wallet = Wallet.create(new_data)
+                transaction.update(wallet_id: new_wallet.id)
+                raise 'Could not save wallet' unless new_wallet
 
                 response.status = 201
-                response['Location'] = "#{@account_route}/#{new_account.id}"
-                { message: 'Account saved', data: new_account }.to_json
+                response['Location'] = "#{@wallet_route}/#{new_wallet.id}"
+                { message: 'Wallet saved', data: new_wallet }.to_json
               rescue Sequel::MassAssignmentRestriction
                 Api.logger.warn "MASS-ASSIGNMENT: #{new_data.keys}"
                 routing.halt 400, { message: 'Illegal Attributes' }.to_json
@@ -240,7 +240,7 @@ module FinanceTracker
             Api.logger.warn "MASS-ASSIGNMENT: #{new_data.keys}"
             routing.halt 400, { message: 'Illegal Attributes' }.to_json
           rescue Sequel::ForeignKeyConstraintViolation
-            routing.halt 404, { message: 'Account not found' }.to_json
+            routing.halt 404, { message: 'Wallet not found' }.to_json
           rescue StandardError => e
             Api.logger.error "UNKNOWN ERROR: #{e.message}"
             routing.halt 500, { message: 'Unknown server error' }.to_json

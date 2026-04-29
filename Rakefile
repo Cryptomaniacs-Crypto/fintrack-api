@@ -70,7 +70,7 @@ namespace :db do
   desc 'Destroy data in database; maintain tables'
   task delete: :load_models do
     FinanceTracker::Category.dataset.destroy
-    FinanceTracker::Account.dataset.destroy
+    FinanceTracker::Wallet.dataset.destroy
     FinanceTracker::Transaction.dataset.destroy
   end
 

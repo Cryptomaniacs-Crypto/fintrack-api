@@ -50,11 +50,11 @@ describe 'Test Category Handling' do
   end
 
   it 'HAPPY: should be able to get category for a transaction' do
-    # account MUST be created first
-    account = FinanceTracker::Account.create(DATA[:accounts][0])
+    # wallet MUST be created first
+    wallet = FinanceTracker::Wallet.create(DATA[:wallets][0])
     category = FinanceTracker::Category.create(DATA[:categories][0])
     transaction = FinanceTracker::Transaction.create(
-      DATA[:transactions][0].merge(account_id: account.id, category_id: category.id)
+      DATA[:transactions][0].merge(wallet_id: wallet.id, category_id: category.id)
     )
 
     get "/api/v1/transactions/#{transaction.id}/category"
@@ -68,7 +68,7 @@ describe 'Test Category Handling' do
     category_data = DATA[:categories][1]
     new_category = FinanceTracker::Category.create(category_data)
 
-    category = FinanceTracker::Category.find(id:new_category.id)
+    category = FinanceTracker::Category.find(id: new_category.id)
     _(category.name).must_equal category_data['name']
     _(category.description).must_equal category_data['description']
   end

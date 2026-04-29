@@ -7,13 +7,13 @@ require_relative '../lib/secure_db'
 module FinanceTracker
   # Models a financial transaction
   class Transaction < Sequel::Model
-    many_to_one :account
+    many_to_one :wallet
     many_to_one :category
 
     plugin :uuid, field: :id
     plugin :timestamps
     plugin :whitelist_security
-    set_allowed_columns :title, :transaction_date, :note, :account_id, :category_id
+    set_allowed_columns :title, :transaction_date, :note, :wallet_id, :category_id
 
     class << self
       def create(values = nil, &block)
