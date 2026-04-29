@@ -21,10 +21,21 @@ module FinanceTracker
 
         secure_values = {}
         regular_values = values.dup
+
+        %i[wallet_name category_name].each do |lookup_key|
+          regular_values.delete(lookup_key)
+          regular_values.delete(lookup_key.to_s)
+        end
+
         if regular_values.key?(:amount)
           secure_values[:amount] = regular_values.delete(:amount)
         elsif regular_values.key?('amount')
           secure_values[:amount] = regular_values.delete('amount')
+        end
+
+        if regular_values.key?(:wallet_id) || regular_values.key?('wallet_id')
+          wallet_id = regular_values[:wallet_id] || regular_values['wallet_id']
+          raise Sequel::ForeignKeyConstraintViolation, 'Wallet not found' unless Wallet.first(id: wallet_id)
         end
 
         transaction = new(regular_values, &block)

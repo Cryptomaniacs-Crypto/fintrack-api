@@ -1,7 +1,13 @@
-- name: "Cash Wallet"
-  account_number:
+---
+- name: Cash Wallet
+  account_number: null
   balance: 500
 
-- name: "Bank Account"
-  account_number: 
+- name: Bank Account
+  account_number: 1234567890
   balance: 3000
+
+- name: Savings Wallet
+  account_number: 9876543210
+  balance: 12000
+  

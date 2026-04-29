@@ -1,8 +1,20 @@
-- title: "Lunch"
+---
+- title: Lunch
   amount: 10
-  transaction_date: "2026-04-09"
+  transaction_date: 2026-04-09
+  note: Lunch with friends
+  wallet_name: Cash Wallet
+  category_name: Food
 
-- title: "Movie"
+- title: Movie
   amount: 15
-  transaction_date: "2026-04-08"
-  note: "watch project hail mary"
+  transaction_date: 2026-04-08
+  note: watch project hail mary
+  wallet_name: Cash Wallet
+  category_name: Entertainment
+
+- title: Groceries
+  amount: 85
+  transaction_date: 2026-04-10
+  wallet_name: Bank Account
+  category_name: Food

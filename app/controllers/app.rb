@@ -312,6 +312,9 @@ module FinanceTracker
           # POST api/v1/transactions
           routing.post do
             new_data = JSON.parse(routing.body.read)
+            wallet_id = new_data['wallet_id'] || new_data[:wallet_id]
+            raise Sequel::ForeignKeyConstraintViolation, 'Wallet not found' if wallet_id && !Wallet.first(id: wallet_id)
+
             new_transaction = Transaction.create(new_data)
 
             response.status = 201

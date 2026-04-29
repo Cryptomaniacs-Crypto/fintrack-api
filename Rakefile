@@ -55,7 +55,7 @@ end
 
 namespace :db do
   task :load do # rubocop:disable Rake/Desc
-    require_app(nil) # load nothing by default
+    require_app(['config'])
     require 'sequel'
 
     Sequel.extension :migration
@@ -63,7 +63,7 @@ namespace :db do
   end
 
   task :load_models do # rubocop:disable Rake/Desc
-    require_app('models')
+    require_app(%w[config models])
   end
 
   desc 'Run migrations'
@@ -73,10 +73,20 @@ namespace :db do
   end
 
   desc 'Destroy data in database; maintain tables'
-  task delete: :load_models do
-    FinanceTracker::Category.dataset.destroy
-    FinanceTracker::Wallet.dataset.destroy
-    FinanceTracker::Transaction.dataset.destroy
+  task reset_seeds: :load_models do # rubocop:disable Rake/Desc
+    FinanceTracker::Api.DB[:accounts_roles].delete if FinanceTracker::Api.DB.tables.include?(:accounts_roles)
+    FinanceTracker::Transaction.dataset.delete if FinanceTracker::Api.DB.tables.include?(:transactions)
+    FinanceTracker::Wallet.dataset.delete if FinanceTracker::Api.DB.tables.include?(:wallets)
+    FinanceTracker::Category.dataset.delete if FinanceTracker::Api.DB.tables.include?(:categories)
+    FinanceTracker::Account.dataset.delete if FinanceTracker::Api.DB.tables.include?(:accounts)
+    FinanceTracker::Role.dataset.delete if FinanceTracker::Api.DB.tables.include?(:roles)
+  end
+
+  desc 'Seed the development database'
+  task seed: %i[load migrate load_models print_env] do
+    require_relative './db/seeds/20260429_create_all'
+
+    FinanceTracker::DatabaseSeed.run
   end
 
   desc 'Delete dev or test database file'
@@ -91,3 +101,6 @@ namespace :db do
     puts "Deleted #{db_filename}"
   end
 end
+
+desc 'Delete all data and reseed'
+task reseed: %i[db:reset_seeds db:seed]
