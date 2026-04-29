@@ -16,7 +16,7 @@ describe 'Test Account API' do
 
   describe 'Account information' do
     it 'HAPPY: should be able to get details of a single account by username' do
-      FinanceTracker::Account.create(account_data)
+      FinanceTracker::CreateAccount.call(account_data:)
 
       get "/api/v1/accounts/#{account_data['username']}"
       _(last_response.status).must_equal 200
@@ -32,7 +32,7 @@ describe 'Test Account API' do
     end
 
     it 'SECURITY: should not expose password digest or hash columns over the API' do
-      FinanceTracker::Account.create(account_data)
+      FinanceTracker::CreateAccount.call(account_data:)
 
       get "/api/v1/accounts/#{account_data['username']}"
       attrs = JSON.parse(last_response.body)['data']['attributes']
@@ -46,7 +46,7 @@ describe 'Test Account API' do
 
   describe 'Searching by email' do
     it 'HAPPY: should find account by email via HMAC lookup' do
-      FinanceTracker::Account.create(account_data)
+      FinanceTracker::CreateAccount.call(account_data:)
 
       get "/api/v1/accounts?email=#{account_data['email']}"
       _(last_response.status).must_equal 200
@@ -56,7 +56,7 @@ describe 'Test Account API' do
     end
 
     it 'SAD: should return 404 if email not found' do
-      FinanceTracker::Account.create(account_data)
+      FinanceTracker::CreateAccount.call(account_data:)
 
       get '/api/v1/accounts?email=nobody@example.com'
       _(last_response.status).must_equal 404
@@ -94,9 +94,48 @@ describe 'Test Account API' do
     end
 
     it 'SAD: should reject duplicate username with 409' do
-      FinanceTracker::Account.create(account_data)
+      FinanceTracker::CreateAccount.call(account_data:)
 
       post 'api/v1/accounts', account_data.to_json, req_header
+      _(last_response.status).must_equal 409
+    end
+  end
+
+  describe 'Account Role Associations' do
+    let(:req_header) { { 'CONTENT_TYPE' => 'application/json' } }
+
+    it 'HAPPY: should assign a role to an account through many-to-many join table' do
+      FinanceTracker::CreateAccount.call(account_data:)
+      FinanceTracker::Role.create(name: 'member')
+
+      post "api/v1/accounts/#{account_data['username']}/roles/member", {}.to_json, req_header
+      _(last_response.status).must_equal 201
+      _(last_response.headers['Location']).must_equal("api/v1/accounts/#{account_data['username']}/roles/member")
+
+      role_names = FinanceTracker::Account.first(username: account_data['username']).system_roles.map(&:name)
+      _(role_names).must_equal ['member']
+    end
+
+    it 'HAPPY: should list roles assigned to an account' do
+      FinanceTracker::CreateAccount.call(account_data:)
+      FinanceTracker::Role.create(name: 'admin')
+      FinanceTracker::Role.create(name: 'member')
+      FinanceTracker::AssignRoleToAccount.call(username: account_data['username'], role_name: 'admin')
+      FinanceTracker::AssignRoleToAccount.call(username: account_data['username'], role_name: 'member')
+
+      get "api/v1/accounts/#{account_data['username']}/roles"
+      _(last_response.status).must_equal 200
+
+      role_names = JSON.parse(last_response.body)['data'].map { |role| role['name'] }.sort
+      _(role_names).must_equal %w[admin member]
+    end
+
+    it 'SAD: should return 409 when assigning a duplicate role' do
+      FinanceTracker::CreateAccount.call(account_data:)
+      FinanceTracker::Role.create(name: 'member')
+      FinanceTracker::AssignRoleToAccount.call(username: account_data['username'], role_name: 'member')
+
+      post "api/v1/accounts/#{account_data['username']}/roles/member", {}.to_json, req_header
       _(last_response.status).must_equal 409
     end
   end

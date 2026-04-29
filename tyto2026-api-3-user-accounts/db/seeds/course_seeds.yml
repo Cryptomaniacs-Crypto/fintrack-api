@@ -1,0 +1,9 @@
+---
+- name: Service Oriented Architecture
+  description: Architectural patterns for loosely-coupled, service-centric systems.
+- name: IT Service Security
+  description: Security engineering for internet-facing IT services.
+- name: Computational Statistics
+  description: Simulation-based statistical methods and data analysis.
+- name: Data Mining
+  description: Methods and practice for extracting patterns from data.
