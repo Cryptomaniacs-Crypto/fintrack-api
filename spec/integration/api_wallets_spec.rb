@@ -27,6 +27,17 @@ describe 'Test Wallet Handling' do
     _(last_response.status).must_equal 404
   end
 
+  it 'SECURITY: should prevent basic SQL injection targeting wallet IDs' do
+    FinanceTracker::Wallet.create(DATA[:wallets][0])
+    FinanceTracker::Wallet.create(DATA[:wallets][1])
+
+    get 'api/v1/wallets/2%20or%20id%3E'
+
+    # deliberately not reporting error -- don't give attacker information
+    _(last_response.status).must_equal 404
+    _(last_response.body['data']).must_be_nil
+  end
+
   describe 'Creating Wallets' do
     before do
       @wallet_data = DATA[:wallets][1]
