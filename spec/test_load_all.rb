@@ -12,6 +12,8 @@ require_relative '../app/models/transaction'
 require_relative '../app/models/wallet'
 require_relative '../app/models/category'
 require_relative '../app/models/password'
+require_relative '../app/models/account'
+require_relative '../app/models/role'
 
 def app
   FinanceTracker::Api
