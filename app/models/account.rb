@@ -39,6 +39,7 @@ module FinanceTracker
       digest.correct?(try_password)
     end
 
+    # rubocop:disable Metrics/MethodLength
     def to_json(options = {})
       JSON(
         {
@@ -50,9 +51,13 @@ module FinanceTracker
               email:,
               avatar:
             }
+          },
+          included: {
+            system_roles: system_roles.map { |role| { id: role.id, name: role.name } }
           }
         }, options
       )
     end
+    # rubocop:enable Metrics/MethodLength
   end
 end
