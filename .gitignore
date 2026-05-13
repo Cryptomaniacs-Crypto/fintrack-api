@@ -3,7 +3,7 @@
 
 # Temp files
 _*
-.bundle
+.bundle/
 .irb_history
 SERVSEC_WORKPLAN.md
 PROJECT_STATUS.md
