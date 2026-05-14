@@ -10,6 +10,9 @@ All routes return JSON.
 - GET  `api/v1/transactions`: Get list of all transactions
 - POST `api/v1/transactions`: Create a new transaction
 - GET  `api/v1/transactions/[transaction_id]`: Get a single transaction
+- GET  `api/v1/wallets?current_account_id=[account_id]`: Get payment methods for an account
+- POST `api/v1/wallets`: Create a payment method for current account
+- GET  `api/v1/wallets/[wallet_id]?current_account_id=[account_id]`: Get a single payment method
 - GET  `api/v1/transactions/[transaction_id]/accounts`: Get list of accounts for a transaction
 - POST `api/v1/transactions/[transaction_id]/accounts`: Create a new account for a transaction
 - GET  `api/v1/transactions/[transaction_id]/accounts/[account_id]`: Get a single account

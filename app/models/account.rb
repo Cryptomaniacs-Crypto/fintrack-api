@@ -8,6 +8,7 @@ require_relative 'password'
 module FinanceTracker
   # Models a registered user account.
   class Account < Sequel::Model
+    one_to_many :wallets
     many_to_many :system_roles,
                  class: :'FinanceTracker::Role',
                  join_table: :accounts_roles,
