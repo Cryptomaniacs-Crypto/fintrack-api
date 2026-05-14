@@ -29,8 +29,13 @@ Rake::TestTask.new(:spec) do |t|
   t.warning = false
 end
 
+desc 'Rerun tests on live code changes'
+task :respec do
+  sh 'rerun -c rake spec'
+end
+
 desc 'Runs rubocop on tested code'
-task style: %i[spec audit] do
+task :style do
   sh 'rubocop .'
 end
 
@@ -40,9 +45,10 @@ task :audit do
 end
 
 desc 'Checks for release'
-task release_check: %i[spec style audit] do
+task release: %i[spec style audit] do
   puts "\nReady for release!"
 end
+task release_check: :release
 
 task :print_env do # rubocop:disable Rake/Desc
   puts "Environment: #{ENV['RACK_ENV'] || 'development'}"
@@ -51,6 +57,13 @@ end
 desc 'Run application console (pry)'
 task console: :print_env do
   sh 'pry -r ./spec/test_load_all'
+end
+
+namespace :run do
+  desc 'Run API in development mode'
+  task dev: [:print_env] do
+    sh 'puma -p 3000'
+  end
 end
 
 namespace :db do
@@ -81,6 +94,9 @@ namespace :db do
     FinanceTracker::Account.dataset.delete if FinanceTracker::Api.DB.tables.include?(:accounts)
     FinanceTracker::Role.dataset.delete if FinanceTracker::Api.DB.tables.include?(:roles)
   end
+
+  desc 'Destroy data in database; maintain tables'
+  task delete: :reset_seeds
 
   desc 'Seed the development database'
   task seed: %i[load migrate load_models print_env] do
