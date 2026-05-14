@@ -23,12 +23,13 @@ module FinanceTracker
 
         # POST api/v1/accounts
         routing.post do
-          new_data = JSON.parse(routing.body.read)
-          new_account = CreateAccount.call(account_data: new_data)
+          new_data = HttpRequest.new(routing).body_data
+          new_account = Account.new(new_data)
+          raise('Could not save account') unless new_account.save_changes
 
           response.status = 201
-          response['Location'] = "#{@account_route}/#{new_account.username}"
-          new_account.to_json
+          response['Location'] = "#{@account_route}/#{new_account.id}"
+          { message: 'Account created', data: new_account }.to_json
         rescue Sequel::MassAssignmentRestriction
           Api.logger.warn "MASS-ASSIGNMENT: #{new_data.keys}"
           routing.halt 400, { message: 'Illegal Attributes' }.to_json

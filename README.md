@@ -39,6 +39,18 @@ Run this API using:
 puma
 ```
 
+## Security and deployment configuration
+
+The API does not manage browser sessions; session encryption and Redis session
+storage are handled by `fintrack-app`.
+
+Required API environment variables are listed in `config/secrets-example.yml`:
+
+- `DATABASE_URL`
+- `SECURE_DB_KEY`
+- `SECURE_HASH_KEY`
+- `SECURE_SCHEME` (`HTTP` for local/test, `HTTPS` for production)
+
 ## Test
 
 Setup test database once:

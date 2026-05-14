@@ -2,6 +2,8 @@
 
 source 'https://rubygems.org'
 
+ruby File.read('.ruby-version').strip if File.exist?('.ruby-version')
+
 # Web API
 gem 'base64'
 gem 'json'
@@ -12,20 +14,30 @@ gem 'roda', '~>3.0'
 # Security
 gem 'rbnacl', '~>7.0'
 
-# Testing
-gem 'minitest'
-gem 'minitest-rg'
-gem 'rack-test'
-
-# Development
-gem 'bundler-audit'
-gem 'pry'
-gem 'rerun'
-gem 'rubocop'
-gem 'rubocop-minitest'
-
 # Database
-gem 'sequel'
-gem 'sqlite3'
-gem 'rake'
 gem 'figaro'
+gem 'rake'
+gem 'sequel'
+
+group :production do
+  gem 'pg'
+end
+
+group :development, :test do
+  gem 'rack-test'
+  gem 'sqlite3'
+end
+
+group :test do
+  gem 'minitest'
+  gem 'minitest-rg'
+  gem 'webmock'
+end
+
+group :development do
+  gem 'bundler-audit'
+  gem 'pry'
+  gem 'rerun'
+  gem 'rubocop'
+  gem 'rubocop-minitest'
+end
