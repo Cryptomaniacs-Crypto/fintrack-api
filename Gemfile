@@ -3,7 +3,6 @@
 source 'https://rubygems.org'
 
 ruby File.read('.ruby-version').strip if File.exist?('.ruby-version')
-
 # Web API
 gem 'base64'
 gem 'json'
