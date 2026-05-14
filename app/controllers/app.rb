@@ -12,6 +12,7 @@ require_relative '../models/role'
 require_relative '../services/get_account_by_username'
 require_relative '../services/find_account_by_email'
 require_relative '../services/create_account'
+require_relative '../services/authenticate_account'
 require_relative '../services/assign_role_to_account'
 require_relative '../services/list_account_roles'
 
@@ -29,6 +30,34 @@ module FinanceTracker
 
       @api_root = 'api/v1'
       routing.on @api_root do
+        routing.on 'auth' do
+          # POST api/v1/auth/authentication
+          routing.post 'authentication' do
+            credentials = JSON.parse(routing.body.read)
+            account = AuthenticateAccount.call(
+              username: credentials['username'],
+              password: credentials['password']
+            )
+
+            roles = account.system_roles.map { |role| { id: role.id, name: role.name } }
+            JSON.generate(
+              data: {
+                type: 'account',
+                attributes: { id: account.id, username: account.username, email: account.email,
+                              avatar: account.avatar }
+              },
+              included: { system_roles: roles }
+            )
+          rescue AuthenticateAccount::UnauthorizedError => e
+            routing.halt 403, { message: e.message }.to_json
+          rescue JSON::ParserError
+            routing.halt 400, { message: 'Invalid JSON body' }.to_json
+          rescue StandardError => e
+            Api.logger.error "UNKNOWN ERROR: #{e.message}"
+            routing.halt 500, { message: 'Unknown server error' }.to_json
+          end
+        end
+
         routing.on 'accounts' do
           @account_route = "#{@api_root}/accounts"
 
