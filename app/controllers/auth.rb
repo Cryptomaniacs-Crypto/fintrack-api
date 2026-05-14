@@ -10,9 +10,22 @@ module FinanceTracker
         # POST api/v1/auth/authentication
         routing.post do
           credentials = JSON.parse(routing.body.read, symbolize_names: true)
-          auth_account = AuthenticateAccount.call(credentials)
-          auth_account.to_json
-        rescue AuthenticateAccount::UnauthorizedError => e
+          auth_account = Services::AuthenticateAccount.call(credentials)
+          {
+            data: {
+              type: 'account',
+              attributes: {
+                id: auth_account.id,
+                username: auth_account.username,
+                email: auth_account.email,
+                avatar: auth_account.avatar
+              }
+            },
+            included: {
+              system_roles: auth_account.system_roles.map { |role| { id: role.id, name: role.name } }
+            }
+          }.to_json
+        rescue Services::AuthenticateAccount::UnauthorizedError => e
           Api.logger.warn "AUTH FAILED: #{e.message}"
           routing.halt 403, { message: 'Invalid credentials' }.to_json
         rescue StandardError => e

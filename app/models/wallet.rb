@@ -5,15 +5,23 @@ require 'sequel'
 require_relative '../lib/secure_db'
 
 module FinanceTracker
-  # Models a financial wallet (e.g., cash wallet, bank account)
+  # Models a payment method (e.g., cash, bank account, card, e-wallet)
   class Wallet < Sequel::Model
+    METHOD_TYPES = %w[cash bank_account credit_card debit_card e_wallet].freeze
+
+    many_to_one :account
     one_to_many :transactions
     plugin :association_dependencies, transactions: :nullify
 
     plugin :uuid, field: :id
     plugin :timestamps
     plugin :whitelist_security
-    set_allowed_columns :name
+    set_allowed_columns :name, :method_type, :account_id
+
+    def before_validation
+      self.method_type = 'cash' if method_type.to_s.strip.empty?
+      super
+    end
 
     class << self
       def create(values = nil, &block)
@@ -65,7 +73,9 @@ module FinanceTracker
             type: 'wallet',
             attributes: {
               id:,
+              account_id:,
               name:,
+              method_type:,
               account_number:,
               balance:
             }
