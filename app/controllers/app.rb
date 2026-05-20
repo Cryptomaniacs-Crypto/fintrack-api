@@ -14,6 +14,7 @@ require_relative '../services/find_account_by_email'
 require_relative '../services/create_account'
 require_relative '../services/assign_role_to_account'
 require_relative '../services/list_account_roles'
+require_relative '../services/list_transactions_for_account'
 
 module FinanceTracker
   # Web controller for Finance Tracker API
@@ -303,10 +304,16 @@ module FinanceTracker
 
           # GET api/v1/transactions
           routing.get do
-            output = { data: Transaction.all }
+            current_account_id = routing.params['current_account_id']
+            routing.halt 401, { message: 'Missing current_account_id' }.to_json unless current_account_id
+
+            output = { data: ListTransactionsForAccount.call(current_account_id: current_account_id) }
             JSON.pretty_generate(output)
-          rescue StandardError
-            routing.halt 404, { message: 'Could not find transactions' }.to_json
+          rescue ListTransactionsForAccount::UnknownCurrentAccountError => e
+            routing.halt 404, { message: e.message }.to_json
+          rescue StandardError => e
+            Api.logger.error "UNKNOWN ERROR: #{e.message}"
+            routing.halt 500, { message: 'Unknown server error' }.to_json
           end
 
           # POST api/v1/transactions
