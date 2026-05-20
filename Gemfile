@@ -10,6 +10,7 @@ gem 'json'
 gem 'logger', '~> 1.0'
 gem 'puma', '~>7.0'
 gem 'roda', '~>3.0'
+gem 'http', '~>5.1'
 
 # Security
 gem 'rbnacl', '~>7.0'
@@ -31,6 +32,7 @@ end
 group :test do
   gem 'minitest'
   gem 'minitest-rg'
+  gem 'webmock'
 end
 
 group :development do

@@ -13,6 +13,7 @@ require_relative '../services/get_account_by_username'
 require_relative '../services/find_account_by_email'
 require_relative '../services/create_account'
 require_relative '../services/authenticate_account'
+require_relative '../services/verify_registration'
 require_relative '../services/assign_role_to_account'
 require_relative '../services/list_account_roles'
 
@@ -50,6 +51,24 @@ module FinanceTracker
             )
           rescue AuthenticateAccount::UnauthorizedError => e
             routing.halt 403, { message: e.message }.to_json
+          rescue JSON::ParserError
+            routing.halt 400, { message: 'Invalid JSON body' }.to_json
+          rescue StandardError => e
+            Api.logger.error "UNKNOWN ERROR: #{e.message}"
+            routing.halt 500, { message: 'Unknown server error' }.to_json
+          end
+
+          # POST api/v1/auth/register
+          routing.post 'register' do
+            registration = JSON.parse(routing.body.read)
+            VerifyRegistration.new(registration).call
+            response.status = 202
+            { message: 'Verification email sent' }.to_json
+          rescue VerifyRegistration::InvalidRegistration => e
+            routing.halt 400, { message: e.message }.to_json
+          rescue VerifyRegistration::EmailProviderError => e
+            Api.logger.error("Registration email failed: #{e.message}")
+            routing.halt 500, { message: 'Could not send verification email' }.to_json
           rescue JSON::ParserError
             routing.halt 400, { message: 'Invalid JSON body' }.to_json
           rescue StandardError => e

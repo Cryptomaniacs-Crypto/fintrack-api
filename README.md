@@ -6,6 +6,8 @@ API to manage transactions, accounts, and categories for personal finance tracki
 
 All routes return JSON.
 
+- POST `api/v1/auth/authentication`: Authenticate with username/password
+- POST `api/v1/auth/register`: Send registration verification email
 - GET  `/`: Root route shows if Web API is running
 - GET  `api/v1/transactions`: Get list of all transactions
 - POST `api/v1/transactions`: Create a new transaction
@@ -38,6 +40,15 @@ Run this API using:
 ```shell
 puma
 ```
+
+## Email verification
+
+Set Resend configuration in the environment (or `config/secrets.yml`):
+
+- `RESEND_API_URL` (default: `https://api.resend.com/emails`)
+- `RESEND_API_KEY`
+- `RESEND_FROM_EMAIL`
+- `RESEND_FROM_NAME`
 
 ## Test
 
