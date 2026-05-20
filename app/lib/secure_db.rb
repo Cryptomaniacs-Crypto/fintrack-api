@@ -13,8 +13,11 @@ module FinanceTracker
     end
 
     def self.setup(db_key, hash_key)
-      Securable.setup(db_key)
-      Securable.setup_hash_key(hash_key)
+      raise Securable::NoKeyError unless db_key
+      raise Securable::NoHashKeyError unless hash_key
+
+      @key      = Base64.strict_decode64(db_key)
+      @hash_key = Base64.strict_decode64(hash_key)
     end
 
     def self.encrypt(plaintext)

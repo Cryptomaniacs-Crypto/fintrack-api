@@ -27,7 +27,7 @@ module FinanceTracker
       token = authorization&.match(/^Bearer (.+)$/)&.captures&.first
       raise AuthToken::InvalidTokenError unless token
 
-      AuthToken.load(token)
+      AuthToken.load(token).payload
     rescue AuthToken::InvalidTokenError, AuthToken::ExpiredTokenError
       routing.halt 403, { message: 'Forbidden' }.to_json
     end
