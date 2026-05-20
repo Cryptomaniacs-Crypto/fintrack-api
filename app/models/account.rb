@@ -8,6 +8,7 @@ require_relative 'password'
 module FinanceTracker
   # Models a registered user account.
   class Account < Sequel::Model
+    one_to_many :wallets
     many_to_many :system_roles,
                  class: :'FinanceTracker::Role',
                  join_table: :accounts_roles,
@@ -39,7 +40,6 @@ module FinanceTracker
       digest.correct?(try_password)
     end
 
-    # rubocop:disable Metrics/MethodLength
     def to_json(options = {})
       JSON(
         {
@@ -51,13 +51,9 @@ module FinanceTracker
               email:,
               avatar:
             }
-          },
-          included: {
-            system_roles: system_roles.map { |role| { id: role.id, name: role.name } }
           }
         }, options
       )
     end
-    # rubocop:enable Metrics/MethodLength
   end
 end

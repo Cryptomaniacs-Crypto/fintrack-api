@@ -28,6 +28,17 @@ describe 'Test Category Handling' do
     _(last_response.status).must_equal 404
   end
 
+  it 'SECURITY: should prevent basic SQL injection targeting category IDs' do
+    FinanceTracker::Category.create(DATA[:categories][0])
+    FinanceTracker::Category.create(DATA[:categories][1])
+
+    get 'api/v1/categories/2%20or%20id%3E'
+
+    # deliberately not reporting error -- don't give attacker information
+    _(last_response.status).must_equal 404
+    _(last_response.body['data']).must_be_nil
+  end
+
   describe 'Creating Categories' do
     before do
       @category_data = DATA[:categories][1]
