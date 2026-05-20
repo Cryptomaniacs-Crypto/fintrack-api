@@ -136,7 +136,7 @@ module FinanceTracker
       # GET api/v1/transactions
       routing.get do
         auth_payload = Api.authorize!(routing)
-        current_account_id = auth_payload[:account_id]
+        current_account_id = auth_payload['account_id']
 
         output = { data: ListTransactionsForAccount.call(current_account_id: current_account_id) }
         JSON.pretty_generate(output)
