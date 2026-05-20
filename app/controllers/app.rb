@@ -22,6 +22,16 @@ module FinanceTracker
     plugin :halt
     plugin :multi_route
 
+    def self.authorize!(routing)
+      authorization = routing.env['HTTP_AUTHORIZATION']
+      token = authorization&.match(/^Bearer (.+)$/)&.captures&.first
+      raise AuthToken::InvalidTokenError unless token
+
+      AuthToken.load(token)
+    rescue AuthToken::InvalidTokenError, AuthToken::ExpiredTokenError
+      routing.halt 403, { message: 'Forbidden' }.to_json
+    end
+
     route do |routing|
       response['Content-Type'] = 'application/json'
 
