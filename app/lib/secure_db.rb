@@ -1,55 +1,39 @@
 # frozen_string_literal: true
 
-require 'base64'
-require 'rbnacl'
+require_relative 'securable'
 
 module FinanceTracker
-  # Encrypt and decrypt values stored in database fields, plus
-  # keyed HMAC for deterministic lookup on encrypted columns.
+  # Encrypt and decrypt values stored in database fields, plus keyed HMAC.
   class SecureDB
-    class NoDbKeyError < StandardError; end
-    class NoHashKeyError < StandardError; end
+    extend Securable
 
-    class << self
-      # Generate a Base64 key for SECURE_DB_KEY or SECURE_HASH_KEY.
-      def generate_key
-        key = RbNaCl::Random.random_bytes(RbNaCl::SecretBox.key_bytes)
-        Base64.strict_encode64(key)
-      end
+    # Public helper to produce a Base64 key for use in secrets.
+    def self.generate_key
+      Securable.generate_key
+    end
 
-      def setup(db_key, hash_key)
-        raise NoDbKeyError unless db_key
-        raise NoHashKeyError unless hash_key
+    def self.setup(db_key, hash_key)
+      Securable.setup(db_key)
+      Securable.setup_hash_key(hash_key)
+    end
 
-        @key = Base64.strict_decode64(db_key)
-        @hash_key = Base64.strict_decode64(hash_key)
-      end
+    def self.encrypt(plaintext)
+      return nil unless plaintext
 
-      # Encrypt or return nil when value is nil.
-      def encrypt(plaintext)
-        return nil unless plaintext
+      base_encrypt(plaintext.to_s)
+    end
 
-        simple_box = RbNaCl::SimpleBox.from_secret_key(@key)
-        ciphertext = simple_box.encrypt(plaintext.to_s)
-        Base64.strict_encode64(ciphertext)
-      end
+    def self.decrypt(ciphertext64)
+      return nil unless ciphertext64
 
-      # Decrypt or return nil when value is nil.
-      def decrypt(ciphertext64)
-        return nil unless ciphertext64
+      base_decrypt(ciphertext64)
+    end
 
-        ciphertext = Base64.strict_decode64(ciphertext64)
-        simple_box = RbNaCl::SimpleBox.from_secret_key(@key)
-        simple_box.decrypt(ciphertext).force_encoding(Encoding::UTF_8)
-      end
+    # Keyed HMAC for deterministic lookup on encrypted columns.
+    def self.hash(plaintext)
+      return nil unless plaintext
 
-      # Keyed HMAC for deterministic lookup on encrypted columns.
-      def hash(plaintext)
-        return nil unless plaintext
-
-        digest = RbNaCl::HMAC::SHA256.auth(@hash_key, plaintext.to_s)
-        Base64.strict_encode64(digest)
-      end
+      base_hash(plaintext.to_s)
     end
   end
 end
