@@ -135,8 +135,8 @@ module FinanceTracker
 
       # GET api/v1/transactions
       routing.get do
-        current_account_id = routing.params['current_account_id']
-        routing.halt 401, { message: 'Missing current_account_id' }.to_json unless current_account_id
+        auth_payload = Api.authorize!(routing)
+        current_account_id = auth_payload[:account_id]
 
         output = { data: ListTransactionsForAccount.call(current_account_id: current_account_id) }
         JSON.pretty_generate(output)
