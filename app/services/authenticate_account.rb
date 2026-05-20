@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # frozen_string_literal: true
 
 require 'json'
@@ -43,3 +44,22 @@ module FinanceTracker
     end
   end
 end
+=======
+# frozen_string_literal: true
+
+module FinanceTracker
+  # Looks up an account by username and verifies its password.
+  class AuthenticateAccount
+    class UnauthorizedError < StandardError; end
+
+    def self.call(username:, password:)
+      raise UnauthorizedError, 'Username and password required' if username.to_s.empty? || password.to_s.empty?
+
+      account = Account.first(username: username)
+      raise UnauthorizedError, 'Invalid credentials' unless account&.password?(password)
+
+      account
+    end
+  end
+end
+>>>>>>> 8e8e0ae15e4c4c7912a868ad23881cff84c9cfe7
