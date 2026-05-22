@@ -32,14 +32,16 @@ module FinanceTracker
       }
     end
 
-    # Encrypted token carries the account envelope plus the internal `id`
-    # the API needs for inline role checks. The id stays out of the
-    # plaintext response -- only callers with MSG_KEY can read it back.
+    # Token payload carries the account_id (used by Api.authorize! to
+    # identify the requesting account) and username (handy for logs).
+    # The envelope's attributes live at envelope['data']['attributes'],
+    # not envelope['attributes'] -- the previous merge crashed on nil.
     def self.token_for(envelope, account_id)
-      token_envelope = envelope.merge(
-        'attributes' => envelope['attributes'].merge('id' => account_id)
-      )
-      AuthToken.new(token_envelope).to_s
+      payload = {
+        'account_id' => account_id,
+        'username' => envelope.dig('data', 'attributes', 'username')
+      }
+      AuthToken.new(payload).to_s
     end
   end
 end
