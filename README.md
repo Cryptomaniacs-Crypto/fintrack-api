@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # FinTrack API
 
 API to manage transactions, accounts, and categories for personal finance tracking.
