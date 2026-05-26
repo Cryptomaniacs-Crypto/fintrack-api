@@ -14,6 +14,10 @@ describe 'Test Account API' do
       'password' => 's3cret-pa55', 'avatar' => 'jane.png' }
   end
 
+  def auth_header(account)
+    { 'HTTP_AUTHORIZATION' => "Bearer #{account.id}" }
+  end
+
   describe 'Account information' do
     it 'HAPPY: should be able to get details of a single account by username' do
       FinanceTracker::CreateAccount.call(account_data:)
@@ -24,6 +28,18 @@ describe 'Test Account API' do
       result = JSON.parse last_response.body
       _(result['data']['attributes']['username']).must_equal account_data['username']
       _(result['data']['attributes']['email']).must_equal account_data['email']
+    end
+
+    it 'HAPPY: should include policy data for the requesting account' do
+      created = FinanceTracker::CreateAccount.call(account_data:)
+
+      get "/api/v1/accounts/#{account_data['username']}", nil, auth_header(created)
+      _(last_response.status).must_equal 200
+
+      result = JSON.parse last_response.body
+      _(result['policies']['can_view']).must_equal true
+      _(result['capabilities']['is_admin']).must_equal false
+      _(result['included']['system_roles']).must_equal []
     end
 
     it 'SAD: should return 404 for unknown username' do

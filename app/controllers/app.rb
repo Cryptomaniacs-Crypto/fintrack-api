@@ -20,6 +20,10 @@ require_relative '../services/list_account_roles'
 module FinanceTracker
   # Web controller for Finance Tracker API
   class Api < Roda
+    CURRENT_ACCOUNT_FOR = lambda do |routing|
+      auth_token = HttpRequest.new(routing).auth_token
+      auth_token ? Account.first(id: auth_token) : nil
+    end
     plugin :halt
 
     route do |routing|
@@ -41,14 +45,12 @@ module FinanceTracker
             )
 
             roles = account.system_roles.map { |role| { id: role.id, name: role.name } }
-            JSON.generate(
-              data: {
-                type: 'account',
-                attributes: { id: account.id, username: account.username, email: account.email,
-                              avatar: account.avatar }
-              },
-              included: { system_roles: roles }
-            )
+            envelope = JSON.parse(account.to_json)
+            envelope['included'] = { system_roles: roles }
+            policy = ::FinanceTracker::AccountPolicy.new(account)
+            envelope['policies'] = policy.summary
+            envelope['capabilities'] = policy.capabilities
+            JSON.generate(envelope)
           rescue AuthenticateAccount::UnauthorizedError => e
             routing.halt 403, { message: e.message }.to_json
           rescue JSON::ParserError
@@ -116,7 +118,19 @@ module FinanceTracker
             # GET api/v1/accounts/[username]
             routing.is do
               routing.get do
-                GetAccountByUsername.call(username:).to_json
+                current_account = CURRENT_ACCOUNT_FOR.call(routing)
+                target = GetAccountByUsername.call(username:)
+                envelope = JSON.parse(target.to_json)
+                envelope['included'] = { system_roles: target.system_roles.map { |role| { id: role.id, name: role.name } } }
+
+                if current_account
+                  policy = ::FinanceTracker::AccountPolicy.new(current_account, target)
+                  routing.halt(404, { message: 'Account not found' }.to_json) unless policy.can_view?
+                  envelope['policies'] = policy.summary
+                  envelope['capabilities'] = policy.capabilities if current_account.id == target.id
+                end
+
+                envelope.to_json
               rescue GetAccountByUsername::AccountNotFoundError => e
                 routing.halt 404, { message: e.message }.to_json
               end
@@ -127,6 +141,13 @@ module FinanceTracker
 
               # GET api/v1/accounts/[username]/roles
               routing.get do
+                current_account = CURRENT_ACCOUNT_FOR.call(routing)
+                target = Account.first(username:)
+                if current_account
+                  routing.halt 403, { message: 'Only admins can manage system roles' }.to_json unless
+                    ::FinanceTracker::SystemRolePolicy.new(current_account, target).can_manage?
+                end
+
                 roles = ListAccountRoles.call(username:).map { |role| { id: role.id, name: role.name } }
                 output = { data: roles }
                 JSON.pretty_generate(output)
@@ -136,6 +157,13 @@ module FinanceTracker
 
               # POST api/v1/accounts/[username]/roles/[role_name]
               routing.post String do |role_name|
+                current_account = CURRENT_ACCOUNT_FOR.call(routing)
+                target = Account.first(username:)
+                if current_account
+                  routing.halt(403, { message: 'Only admins can manage system roles' }.to_json) unless
+                    ::FinanceTracker::SystemRolePolicy.new(current_account, target).can_manage?
+                end
+
                 assigned_role = AssignRoleToAccount.call(username:, role_name:)
 
                 response.status = 201
@@ -147,6 +175,7 @@ module FinanceTracker
               rescue AssignRoleToAccount::RoleAlreadyAssignedError => e
                 routing.halt 409, { message: e.message }.to_json
               end
+
             end
           end
         end
@@ -157,26 +186,49 @@ module FinanceTracker
           # GET api/v1/wallets/[wallet_id]
           routing.get String do |wallet_id|
             wallet = Wallet.first(id: wallet_id)
-            wallet ? wallet.to_json : raise('Wallet not found')
+            current_account = CURRENT_ACCOUNT_FOR.call(routing)
+            if current_account
+              routing.halt(404, { message: 'Wallet not found' }.to_json) unless ::FinanceTracker::WalletPolicy.new(current_account, wallet).can_view?
+            end
+
+            if wallet
+              envelope = JSON.parse(wallet.to_json)
+              envelope['policies'] = ::FinanceTracker::WalletPolicy.new(current_account, wallet).summary if current_account
+              envelope.to_json
+            else
+              raise('Wallet not found')
+            end
           rescue StandardError => e
             routing.halt 404, { message: e.message }.to_json
           end
 
           # GET api/v1/wallets
           routing.get do
-            { data: Wallet.all }.to_json
+            current_account = CURRENT_ACCOUNT_FOR.call(routing)
+            wallets = current_account ? ::FinanceTracker::WalletScope.new(current_account).viewable.all : Wallet.all
+            payload = wallets.map do |wallet|
+              envelope = JSON.parse(wallet.to_json)
+              envelope['policies'] = ::FinanceTracker::WalletPolicy.new(current_account, wallet).index_summary if current_account
+              envelope
+            end
+            { data: payload }.to_json
           rescue StandardError
             routing.halt 404, { message: 'Could not find wallets' }.to_json
           end
 
           # POST api/v1/wallets
           routing.post do
-            new_data = JSON.parse(routing.body.read)
+            request = HttpRequest.new(routing)
+            new_data = request.body_data
+            current_account = CURRENT_ACCOUNT_FOR.call(routing)
+            new_data[:account_id] ||= current_account&.id
             new_wallet = Wallet.create(new_data)
 
             response.status = 201
             response['Location'] = "#{@wallet_route}/#{new_wallet.id}"
-            { message: 'Wallet saved', data: new_wallet }.to_json
+            envelope = JSON.parse(new_wallet.to_json)
+            envelope['policies'] = current_account ? ::FinanceTracker::WalletPolicy.new(current_account, new_wallet).summary : {}
+            { message: 'Wallet saved', data: envelope }.to_json
           rescue Sequel::MassAssignmentRestriction
             Api.logger.warn "MASS-ASSIGNMENT: #{new_data.keys}"
             routing.halt 400, { message: 'Illegal Attributes' }.to_json
@@ -192,27 +244,49 @@ module FinanceTracker
           # GET api/v1/categories/[category_id]
           routing.get String do |category_id|
             category = Category.first(id: category_id)
-            category ? category.to_json : raise('Category not found')
+            current_account = CURRENT_ACCOUNT_FOR.call(routing)
+            if current_account
+              routing.halt(404, { message: 'Category not found' }.to_json) unless ::FinanceTracker::CategoryPolicy.new(current_account, category).can_view?
+            end
+
+            if category
+              envelope = JSON.parse(category.to_json)
+              envelope['policies'] = ::FinanceTracker::CategoryPolicy.new(current_account, category).summary if current_account
+              envelope.to_json
+            else
+              raise('Category not found')
+            end
           rescue StandardError => e
             routing.halt 404, { message: e.message }.to_json
           end
 
           # GET api/v1/categories
           routing.get do
-            { data: Category.all }.to_json
+            current_account = CURRENT_ACCOUNT_FOR.call(routing)
+            categories = current_account ? ::FinanceTracker::CategoryScope.new(current_account).viewable.all : Category.all
+            payload = categories.map do |category|
+              envelope = JSON.parse(category.to_json)
+              envelope['policies'] = ::FinanceTracker::CategoryPolicy.new(current_account, category).index_summary if current_account
+              envelope
+            end
+            { data: payload }.to_json
           rescue StandardError
             routing.halt 404, { message: 'Could not find categories' }.to_json
           end
 
           # POST api/v1/categories
           routing.post do
-            new_data = JSON.parse(routing.body.read)
+            request = HttpRequest.new(routing)
+            new_data = request.body_data
+            current_account = CURRENT_ACCOUNT_FOR.call(routing)
             new_category = Category.new(new_data)
             raise('Could not save category') unless new_category.save_changes
 
             response.status = 201
             response['Location'] = "#{@category_route}/#{new_category.id}"
-            { message: 'Category saved', data: new_category }.to_json
+            envelope = JSON.parse(new_category.to_json)
+            envelope['policies'] = current_account ? ::FinanceTracker::CategoryPolicy.new(current_account, new_category).summary : {}
+            { message: 'Category saved', data: envelope }.to_json
           rescue Sequel::MassAssignmentRestriction
             Api.logger.warn "MASS-ASSIGNMENT: #{new_data.keys}"
             routing.halt 400, { message: 'Illegal Attributes' }.to_json
@@ -231,6 +305,10 @@ module FinanceTracker
               routing.get do
                 transaction = Transaction.first(id: transaction_id)
                 wallet = transaction&.wallet
+                current_account = CURRENT_ACCOUNT_FOR.call(routing)
+                if current_account && wallet
+                  routing.halt(404, { message: 'Wallet not found' }.to_json) unless ::FinanceTracker::WalletPolicy.new(current_account, wallet).can_view?
+                end
                 wallet ? wallet.to_json : raise('Wallet not found')
               rescue StandardError => e
                 routing.halt 404, { message: e.message }.to_json
@@ -242,6 +320,10 @@ module FinanceTracker
               routing.get do
                 transaction = Transaction.first(id: transaction_id)
                 category = transaction&.category
+                current_account = CURRENT_ACCOUNT_FOR.call(routing)
+                if current_account && category
+                  routing.halt(404, { message: 'Category not found' }.to_json) unless ::FinanceTracker::CategoryPolicy.new(current_account, category).can_view?
+                end
                 category ? category.to_json : raise('Category not found')
               rescue StandardError => e
                 routing.halt 404, { message: e.message }.to_json
@@ -256,6 +338,10 @@ module FinanceTracker
                 transaction = Transaction.first(id: transaction_id)
                 wallet = transaction&.wallet
                 wallet = nil unless wallet&.id.to_s == wallet_id.to_s
+                current_account = CURRENT_ACCOUNT_FOR.call(routing)
+                if current_account && wallet
+                  routing.halt(404, { message: 'Wallet not found' }.to_json) unless ::FinanceTracker::WalletPolicy.new(current_account, wallet).can_view?
+                end
                 wallet ? wallet.to_json : raise('Wallet not found')
               rescue StandardError => e
                 routing.halt 404, { message: e.message }.to_json
@@ -266,7 +352,13 @@ module FinanceTracker
                 transaction = Transaction.first(id: transaction_id)
                 raise 'Transaction not found' unless transaction
 
-                output = { data: transaction.wallet ? [transaction.wallet] : [] }
+                current_account = CURRENT_ACCOUNT_FOR.call(routing)
+                wallet = transaction.wallet
+                if current_account && wallet
+                  routing.halt(404, { message: 'Wallet not found' }.to_json) unless ::FinanceTracker::WalletPolicy.new(current_account, wallet).can_view?
+                end
+
+                output = { data: wallet ? [wallet] : [] }
                 JSON.pretty_generate(output)
               rescue StandardError
                 routing.halt 404, { message: 'Could not find wallets' }.to_json
@@ -274,10 +366,13 @@ module FinanceTracker
 
               # POST api/v1/transactions/[transaction_id]/wallets
               routing.post do
-                new_data = JSON.parse(routing.body.read)
+                request = HttpRequest.new(routing)
+                new_data = request.body_data
                 transaction = Transaction.first(id: transaction_id)
                 raise 'Transaction not found' unless transaction
 
+                current_account = CURRENT_ACCOUNT_FOR.call(routing)
+                new_data[:account_id] ||= current_account&.id
                 new_wallet = Wallet.create(new_data)
                 transaction.update(wallet_id: new_wallet.id)
                 raise 'Could not save wallet' unless new_wallet
@@ -302,6 +397,10 @@ module FinanceTracker
                 transaction = Transaction.first(id: transaction_id)
                 category = transaction&.category
                 category = nil unless category&.id.to_s == category_id.to_s
+                current_account = CURRENT_ACCOUNT_FOR.call(routing)
+                if current_account && category
+                  routing.halt(404, { message: 'Category not found' }.to_json) unless ::FinanceTracker::CategoryPolicy.new(current_account, category).can_view?
+                end
                 category ? category.to_json : raise('Category not found')
               rescue StandardError => e
                 routing.halt 404, { message: e.message }.to_json
@@ -312,7 +411,13 @@ module FinanceTracker
                 transaction = Transaction.first(id: transaction_id)
                 raise 'Transaction not found' unless transaction
 
-                output = { data: transaction.category ? [transaction.category] : [] }
+                current_account = CURRENT_ACCOUNT_FOR.call(routing)
+                category = transaction.category
+                if current_account && category
+                  routing.halt(404, { message: 'Category not found' }.to_json) unless ::FinanceTracker::CategoryPolicy.new(current_account, category).can_view?
+                end
+
+                output = { data: category ? [category] : [] }
                 JSON.pretty_generate(output)
               rescue StandardError
                 routing.halt 404, { message: 'Could not find categories' }.to_json
@@ -320,7 +425,8 @@ module FinanceTracker
 
               # POST api/v1/transactions/[transaction_id]/categories
               routing.post do
-                new_data = JSON.parse(routing.body.read)
+                request = HttpRequest.new(routing)
+                new_data = request.body_data
                 transaction = Transaction.first(id: transaction_id)
                 raise 'Transaction not found' unless transaction
 
@@ -343,7 +449,17 @@ module FinanceTracker
             # GET api/v1/transactions/[transaction_id]
             routing.get do
               transaction = Transaction.first(id: transaction_id)
-              transaction ? transaction.to_json : raise('Transaction not found')
+              current_account = CURRENT_ACCOUNT_FOR.call(routing)
+              if current_account && transaction
+                routing.halt(404, { message: 'Transaction not found' }.to_json) unless ::FinanceTracker::TransactionPolicy.new(current_account, transaction).can_view?
+              end
+              if transaction
+                envelope = JSON.parse(transaction.to_json)
+                envelope['policies'] = ::FinanceTracker::TransactionPolicy.new(current_account, transaction).summary if current_account
+                envelope.to_json
+              else
+                raise('Transaction not found')
+              end
             rescue StandardError => e
               routing.halt 404, { message: e.message }.to_json
             end
@@ -351,7 +467,14 @@ module FinanceTracker
 
           # GET api/v1/transactions
           routing.get do
-            output = { data: Transaction.all }
+            current_account = CURRENT_ACCOUNT_FOR.call(routing)
+            transactions = current_account ? ::FinanceTracker::TransactionScope.new(current_account).viewable.all : Transaction.all
+            payload = transactions.map do |transaction|
+              envelope = JSON.parse(transaction.to_json)
+              envelope['policies'] = ::FinanceTracker::TransactionPolicy.new(current_account, transaction).index_summary if current_account
+              envelope
+            end
+            output = { data: payload }
             JSON.pretty_generate(output)
           rescue StandardError
             routing.halt 404, { message: 'Could not find transactions' }.to_json
@@ -359,15 +482,26 @@ module FinanceTracker
 
           # POST api/v1/transactions
           routing.post do
-            new_data = JSON.parse(routing.body.read)
+            request = HttpRequest.new(routing)
+            new_data = request.body_data
+            current_account = CURRENT_ACCOUNT_FOR.call(routing)
             wallet_id = new_data['wallet_id'] || new_data[:wallet_id]
-            raise Sequel::ForeignKeyConstraintViolation, 'Wallet not found' if wallet_id && !Wallet.first(id: wallet_id)
+            if wallet_id
+              wallet = Wallet.first(id: wallet_id)
+              raise Sequel::ForeignKeyConstraintViolation, 'Wallet not found' unless wallet
+
+              if current_account && !::FinanceTracker::WalletPolicy.new(current_account, wallet).can_view?
+                routing.halt 404, { message: 'Wallet not found' }.to_json
+              end
+            end
 
             new_transaction = Transaction.create(new_data)
 
             response.status = 201
             response['Location'] = "#{@transaction_route}/#{new_transaction.id}"
-            { message: 'Transaction saved', data: new_transaction }.to_json
+            envelope = JSON.parse(new_transaction.to_json)
+            envelope['policies'] = current_account ? ::FinanceTracker::TransactionPolicy.new(current_account, new_transaction).summary : {}
+            { message: 'Transaction saved', data: envelope }.to_json
           rescue Sequel::MassAssignmentRestriction
             Api.logger.warn "MASS-ASSIGNMENT: #{new_data.keys}"
             routing.halt 400, { message: 'Illegal Attributes' }.to_json
@@ -377,8 +511,12 @@ module FinanceTracker
             Api.logger.error "UNKNOWN ERROR: #{e.message}"
             routing.halt 500, { message: 'Unknown server error' }.to_json
           end
+
         end
       end
+
+      private
+
     end
   end
 end

@@ -7,13 +7,14 @@ require_relative '../lib/secure_db'
 module FinanceTracker
   # Models a financial wallet (e.g., cash wallet, bank account)
   class Wallet < Sequel::Model
+    many_to_one :account
     one_to_many :transactions
     plugin :association_dependencies, transactions: :nullify
 
     plugin :uuid, field: :id
     plugin :timestamps
     plugin :whitelist_security
-    set_allowed_columns :name
+    set_allowed_columns :account_id, :name
 
     class << self
       def create(values = nil, &block)

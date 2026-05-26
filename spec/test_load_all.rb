@@ -14,7 +14,7 @@ require 'minitest/rg'
 require 'yaml'
 require 'json'
 
-require_app(%w[config models controllers])
+require_app(%w[config models controllers policies])
 
 def app
   FinanceTracker::Api

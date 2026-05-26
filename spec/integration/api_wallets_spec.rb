@@ -9,6 +9,10 @@ describe 'Test Wallet Handling' do
     wipe_database
   end
 
+  def auth_header(account)
+    { 'HTTP_AUTHORIZATION' => "Bearer #{account.id}" }
+  end
+
   it 'HAPPY: should be able to get wallet for a transaction' do
     wallet = FinanceTracker::Wallet.create(DATA[:wallets][0])
     transaction = FinanceTracker::Transaction.create(
@@ -54,6 +58,23 @@ describe 'Test Wallet Handling' do
 
       _(created['id']).must_equal wallet.id
       _(created['name']).must_equal @wallet_data['name']
+    end
+
+    it 'HAPPY: should attach the requesting account to the wallet' do
+      account = FinanceTracker::CreateAccount.call(
+        account_data: {
+          'username' => 'wallet.owner',
+          'email' => 'wallet.owner@example.com',
+          'password' => 'wallet-password',
+          'avatar' => 'wallet.png'
+        }
+      )
+
+      post 'api/v1/wallets', @wallet_data.to_json, @req_header.merge(auth_header(account))
+      _(last_response.status).must_equal 201
+
+      wallet = FinanceTracker::Wallet.first
+      _(wallet.account_id).must_equal account.id
     end
 
     it 'SECURITY: should not create wallet with mass assignment' do

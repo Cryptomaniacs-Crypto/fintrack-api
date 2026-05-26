@@ -7,6 +7,7 @@ Sequel.migration do
     create_table(:wallets) do
       uuid :id, primary_key: true
 
+      foreign_key :account_id, :accounts, type: :uuid, null: true, on_delete: :cascade
       String :name, null: false
       String :account_number_secure
       String :balance_secure, null: false
