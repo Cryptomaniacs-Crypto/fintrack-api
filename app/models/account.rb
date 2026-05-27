@@ -39,6 +39,12 @@ module FinanceTracker
       digest.correct?(try_password)
     end
 
+    # System-level capabilities for this account.
+    # Delegates to AccountPolicy so the rules stay in one place.
+    def capability
+      AccountPolicy.new(self).capabilities
+    end
+
     def to_json(options = {})
       JSON(
         {

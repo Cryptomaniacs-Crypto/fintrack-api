@@ -52,7 +52,7 @@ module FinanceTracker
             envelope['capabilities'] = policy.capabilities
             JSON.generate(envelope)
           rescue AuthenticateAccount::UnauthorizedError => e
-            routing.halt 403, { message: e.message }.to_json
+            routing.halt 401, { message: e.message }.to_json
           rescue JSON::ParserError
             routing.halt 400, { message: 'Invalid JSON body' }.to_json
           rescue StandardError => e
