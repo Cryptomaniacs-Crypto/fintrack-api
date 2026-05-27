@@ -5,7 +5,6 @@ require 'roda'
 require 'figaro'
 require 'sequel'
 require_relative '../app/lib/secure_db'
-require_relative '../app/lib/auth_token'
 
 module FinanceTracker
   class Api < Roda
@@ -29,7 +28,6 @@ module FinanceTracker
       
       # Load crypto keys
       SecureDB.setup(ENV.delete('SECURE_DB_KEY'), ENV.delete('SECURE_HASH_KEY'))
-      AuthToken.setup(ENV.delete('AUTH_TOKEN_KEY'))
 
       # Custom events logging
       LOGGER = Logger.new($stderr)

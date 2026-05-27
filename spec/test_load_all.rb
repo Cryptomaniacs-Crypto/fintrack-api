@@ -5,7 +5,7 @@ require_app(['config'])
 require 'sequel'
 
 Sequel.extension :migration
-Sequel::Migrator.run(FinanceTracker::Api.DB, 'app/db/migrations')
+Sequel::Migrator.run(FinanceTracker::Api.DB, 'db/migrations')
 
 require 'rack/test'
 require 'minitest/autorun'
@@ -14,7 +14,7 @@ require 'minitest/rg'
 require 'yaml'
 require 'json'
 
-require_app(%w[config models controllers])
+require_app(%w[config models controllers policies])
 
 def app
   FinanceTracker::Api

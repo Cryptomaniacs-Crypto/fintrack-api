@@ -8,7 +8,6 @@ require_relative 'password'
 module FinanceTracker
   # Models a registered user account.
   class Account < Sequel::Model
-    one_to_many :wallets
     many_to_many :system_roles,
                  class: :'FinanceTracker::Role',
                  join_table: :accounts_roles,
@@ -38,6 +37,12 @@ module FinanceTracker
     def password?(try_password)
       digest = Password.from_digest(password_digest)
       digest.correct?(try_password)
+    end
+
+    # System-level capabilities for this account.
+    # Delegates to AccountPolicy so the rules stay in one place.
+    def capability
+      AccountPolicy.new(self).capabilities
     end
 
     def to_json(options = {})
