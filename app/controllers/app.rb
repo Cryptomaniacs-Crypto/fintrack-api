@@ -16,6 +16,15 @@ require_relative '../services/authenticate_account'
 require_relative '../services/verify_registration'
 require_relative '../services/assign_role_to_account'
 require_relative '../services/list_account_roles'
+require_relative '../policies/account_policy'
+require_relative '../policies/account_scope'
+require_relative '../policies/category_policy'
+require_relative '../policies/category_scope'
+require_relative '../policies/system_role_policy'
+require_relative '../policies/transaction_policy'
+require_relative '../policies/transaction_scope'
+require_relative '../policies/wallet_policy'
+require_relative '../policies/wallet_scope'
 
 module FinanceTracker
   # Web controller for Finance Tracker API
