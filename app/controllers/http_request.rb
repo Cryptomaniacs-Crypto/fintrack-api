@@ -22,5 +22,11 @@ module FinanceTracker
 
       auth_header[/\ABearer\s+(.+)\z/i, 1]
     end
+
+    def secure?
+      raise 'Secure scheme not configured' unless Api.config.SECURE_SCHEME
+
+      @routing.scheme.casecmp(Api.config.SECURE_SCHEME).zero?
+    end
   end
 end
