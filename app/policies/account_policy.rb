@@ -1,38 +1,45 @@
 # frozen_string_literal: true
 
+require_relative '../lib/auth_scope'
+
 module FinanceTracker
   class AccountPolicy
-    def initialize(viewer, target = viewer)
+    RESOURCE = 'accounts'
+
+    def initialize(viewer, target = viewer, auth_scope: AuthScope.new)
       @viewer = viewer
       @target = target
+      @auth_scope = auth_scope
     end
 
+    # Identity fact, independent of the token's scope: a read-only key still
+    # belongs to an admin, it just cannot perform writes.
     def is_admin?
       role_names.include?('admin')
     end
 
     def can_manage_system_roles?
-      is_admin?
+      can_write? && is_admin?
     end
 
     def can_create_wallet?
-      @viewer ? true : false
+      can_write?('wallets') && !@viewer.nil?
     end
 
     def can_create_transaction?
-      @viewer ? true : false
+      can_write?('transactions') && !@viewer.nil?
     end
 
     def can_view?
-      viewer_is_self? || is_admin?
+      can_read? && (viewer_is_self? || is_admin?)
     end
 
     def can_edit?
-      viewer_is_self? || is_admin?
+      can_write? && (viewer_is_self? || is_admin?)
     end
 
     def can_delete?
-      is_admin? && !viewer_is_self?
+      can_write? && is_admin? && !viewer_is_self?
     end
 
     def can_assign_role?
@@ -71,6 +78,14 @@ module FinanceTracker
     end
 
     private
+
+    def can_read?(resource = RESOURCE)
+      @auth_scope.can_read?(resource)
+    end
+
+    def can_write?(resource = RESOURCE)
+      @auth_scope.can_write?(resource)
+    end
 
     def viewer_is_self?
       @viewer && @target && @viewer.id == @target.id

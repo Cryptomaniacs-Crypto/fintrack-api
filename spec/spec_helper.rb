@@ -13,6 +13,23 @@ def wipe_database
   end
 end
 
+# Mint a real encrypted auth token for an account (FULL scope by default).
+# Pass a scope string (e.g. FinanceTracker::AuthScope::READ_ONLY) for a
+# reduced-scope key.
+def auth_token_for(account, scope: FinanceTracker::AuthScope.new)
+  scope = FinanceTracker::AuthScope.new(scope) if scope.is_a?(String)
+  payload = {
+    'type' => 'account',
+    'attributes' => { 'id' => account.id, 'username' => account.username }
+  }
+  FinanceTracker::AuthToken.new(payload, scope:).to_s
+end
+
+# Rack::Test header hash carrying a bearer token for the given account.
+def auth_header_for(account, scope: FinanceTracker::AuthScope.new)
+  { 'HTTP_AUTHORIZATION' => "Bearer #{auth_token_for(account, scope:)}" }
+end
+
 DATA = {} # rubocop:disable Style/MutableConstant
 DATA[:wallets] = YAML.safe_load_file('db/seeds/wallet_seed.yml')
 DATA[:categories] = YAML.safe_load_file('db/seeds/category_seed.yml')
