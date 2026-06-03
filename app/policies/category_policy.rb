@@ -1,18 +1,23 @@
 # frozen_string_literal: true
 
+require_relative '../lib/auth_scope'
+
 module FinanceTracker
   class CategoryPolicy
-    def initialize(account, category)
+    RESOURCE = 'categories'
+
+    def initialize(account, category, auth_scope: AuthScope.new)
       @account = account
       @category = category
+      @auth_scope = auth_scope
     end
 
     def can_view?
-      !!@account
+      can_read? && !@account.nil?
     end
 
     def can_edit?
-      AccountPolicy.new(@account).is_admin?
+      can_write? && AccountPolicy.new(@account).is_admin?
     end
 
     def can_delete?
@@ -29,6 +34,16 @@ module FinanceTracker
 
     def index_summary
       { can_view: can_view?, can_edit: can_edit? }
+    end
+
+    private
+
+    def can_read?
+      @auth_scope.can_read?(RESOURCE)
+    end
+
+    def can_write?
+      @auth_scope.can_write?(RESOURCE)
     end
   end
 end

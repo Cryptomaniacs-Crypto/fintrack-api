@@ -10,7 +10,7 @@ describe 'Test Wallet Handling' do
   end
 
   def auth_header(account)
-    { 'HTTP_AUTHORIZATION' => "Bearer #{account.id}" }
+    auth_header_for(account)
   end
 
   it 'HAPPY: should be able to get wallet for a transaction' do

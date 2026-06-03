@@ -15,7 +15,7 @@ describe 'Test Account API' do
   end
 
   def auth_header(account)
-    { 'HTTP_AUTHORIZATION' => "Bearer #{account.id}" }
+    auth_header_for(account)
   end
 
   describe 'Account information' do

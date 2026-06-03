@@ -16,6 +16,12 @@ namespace :newkey do
   task :hash do
     puts "SECURE_HASH_KEY: #{FinanceTracker::SecureDB.generate_key}"
   end
+
+  desc 'Create sample cryptographic key for auth token encryption'
+  task :token do
+    require_relative './app/lib/auth_token'
+    puts "TOKEN_KEY: #{FinanceTracker::AuthToken.generate_key}"
+  end
 end
 
 desc 'Tests API specs only'

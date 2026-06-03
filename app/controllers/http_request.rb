@@ -2,6 +2,9 @@
 
 require 'json'
 
+require_relative '../lib/auth_token'
+require_relative '../models/authorized_account'
+
 module FinanceTracker
   # Small request wrapper for JSON bodies and bearer tokens.
   class HttpRequest
@@ -21,6 +24,19 @@ module FinanceTracker
       return nil unless auth_header
 
       auth_header[/\ABearer\s+(.+)\z/i, 1]
+    end
+
+    # Decrypts the Bearer token into an AuthorizedAccount carrying the account
+    # identity payload plus the token's AuthScope, or nil when no token is
+    # present. Raises AuthToken::InvalidTokenError / ExpiredTokenError when a
+    # token is present but unparseable or expired -- the controller maps those
+    # to 401 so a bad token never silently degrades to anonymous access.
+    def authorized_account
+      token = auth_token
+      return nil unless token
+
+      decoded = AuthToken.load(token)
+      AuthorizedAccount.new(decoded.payload, decoded.scope)
     end
 
     def secure?
