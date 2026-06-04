@@ -13,7 +13,8 @@ module FinanceTracker
                  join_table: :accounts_roles,
                  left_key: :account_id,
                  right_key: :role_id
-    plugin :association_dependencies, system_roles: :nullify
+    one_to_many :sso_identities
+    plugin :association_dependencies, system_roles: :nullify, sso_identities: :destroy
 
     plugin :uuid, field: :id
     plugin :timestamps, update_on_create: true
