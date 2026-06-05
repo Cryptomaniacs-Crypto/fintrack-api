@@ -40,6 +40,11 @@ module FinanceTracker
       digest.correct?(try_password)
     end
 
+    # Role-predicate shortcuts for controllers and policies.
+    def admin?   = system_roles.any?(&:admin?)
+    def creator? = system_roles.any?(&:creator?)
+    def member?  = system_roles.any?(&:member?)
+
     # System-level capabilities for this account.
     # Delegates to AccountPolicy so the rules stay in one place.
     def capability
