@@ -6,17 +6,22 @@ require 'json'
 require_relative '../../config/environments'
 require_relative 'http_request'
 require_relative '../lib/auth_scope'
+require_relative '../lib/google_id_token'
 require_relative '../models/transaction'
 require_relative '../models/wallet'
 require_relative '../models/category'
 require_relative '../models/account'
+require_relative '../models/google_account'
 require_relative '../models/role'
 require_relative '../models/authorized_account'
+require_relative '../models/sso_identity'
 require_relative '../services/get_account_by_username'
 require_relative '../services/find_account_by_email'
 require_relative '../services/create_account'
 require_relative '../services/authenticate_account'
+require_relative '../services/authenticate_sso'
 require_relative '../services/authorize_account'
+require_relative '../services/find_or_create_sso_account'
 require_relative '../services/verify_registration'
 require_relative '../services/assign_role_to_account'
 require_relative '../services/list_account_roles'
@@ -99,6 +104,22 @@ module FinanceTracker
           rescue StandardError => e
             Api.logger.error "UNKNOWN ERROR: #{e.message}"
             routing.halt 500, { message: 'Unknown server error' }.to_json
+          end
+
+          # POST api/v1/auth/sso
+          routing.post 'sso' do
+            id_token = HttpRequest.new(routing).body_data[:id_token]
+            routing.halt(400, { message: 'Missing id_token' }.to_json) if id_token.to_s.empty?
+
+            JSON.generate(AuthenticateSso.call(id_token))
+          rescue OidcVerifier::VerificationError => e
+            Api.logger.warn("SSO verification failed: #{e.message}")
+            routing.halt 401, { message: 'Invalid SSO credentials' }.to_json
+          rescue FindOrCreateSsoAccount::EmailConflictError
+            routing.halt 409, { message: 'Email already registered to another account' }.to_json
+          rescue StandardError => e
+            Api.logger.error("SSO ERROR: #{e.message}")
+            routing.halt 400, { message: 'SSO authentication failed' }.to_json
           end
         end
 
