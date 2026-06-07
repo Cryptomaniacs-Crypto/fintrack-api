@@ -22,6 +22,14 @@ namespace :newkey do
     require_relative './app/lib/auth_token'
     puts "TOKEN_KEY: #{FinanceTracker::AuthToken.generate_key}"
   end
+
+  desc 'Create sign/verify keypair for signed client requests'
+  task :signing do
+    require_relative './app/lib/signed_request'
+    keypair = FinanceTracker::SignedRequest.generate_keypair
+    puts "SIGNING_KEY (app, private): #{keypair[:signing_key]}"
+    puts "VERIFY_KEY  (api, public):  #{keypair[:verify_key]}"
+  end
 end
 
 desc 'Tests API specs only'

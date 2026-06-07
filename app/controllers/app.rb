@@ -62,12 +62,19 @@ module FinanceTracker
       @api_root = 'api/v1'
       routing.on @api_root do
         routing.on 'auth' do
+          # Every auth POST carries no auth_token, so it must be signed by the
+          # app. Verify once here; @request_data is the verified inner body.
+          begin
+            @request_data = HttpRequest.new(routing).signed_body_data
+          rescue SignedRequest::VerificationError
+            routing.halt 403, { message: 'Must sign request' }.to_json
+          end
+
           # POST api/v1/auth/authentication
           routing.post 'authentication' do
-            credentials = JSON.parse(routing.body.read)
             account = AuthenticateAccount.call(
-              username: credentials['username'],
-              password: credentials['password']
+              username: @request_data[:username],
+              password: @request_data[:password]
             )
 
             roles = account.system_roles.map { |role| { id: role.id, name: role.name } }
@@ -83,8 +90,6 @@ module FinanceTracker
             JSON.generate(envelope)
           rescue AuthenticateAccount::UnauthorizedError => e
             routing.halt 401, { message: e.message }.to_json
-          rescue JSON::ParserError
-            routing.halt 400, { message: 'Invalid JSON body' }.to_json
           rescue StandardError => e
             Api.logger.error "UNKNOWN ERROR: #{e.message}"
             routing.halt 500, { message: 'Unknown server error' }.to_json
@@ -92,8 +97,7 @@ module FinanceTracker
 
           # POST api/v1/auth/register
           routing.post 'register' do
-            registration = JSON.parse(routing.body.read)
-            VerifyRegistration.new(registration).call
+            VerifyRegistration.new(@request_data).call
             response.status = 202
             { message: 'Verification email sent' }.to_json
           rescue VerifyRegistration::InvalidRegistration => e
@@ -101,8 +105,6 @@ module FinanceTracker
           rescue VerifyRegistration::EmailProviderError => e
             Api.logger.error("Registration email failed: #{e.message}")
             routing.halt 500, { message: 'Could not send verification email' }.to_json
-          rescue JSON::ParserError
-            routing.halt 400, { message: 'Invalid JSON body' }.to_json
           rescue StandardError => e
             Api.logger.error "UNKNOWN ERROR: #{e.message}"
             routing.halt 500, { message: 'Unknown server error' }.to_json
@@ -110,7 +112,7 @@ module FinanceTracker
 
           # POST api/v1/auth/sso
           routing.post 'sso' do
-            id_token = HttpRequest.new(routing).body_data[:id_token]
+            id_token = @request_data[:id_token]
             routing.halt(400, { message: 'Missing id_token' }.to_json) if id_token.to_s.empty?
 
             JSON.generate(AuthenticateSso.call(id_token))

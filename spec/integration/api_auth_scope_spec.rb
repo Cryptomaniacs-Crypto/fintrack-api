@@ -23,7 +23,7 @@ describe 'Test Auth Scopes' do
     it 'HAPPY: login returns a FULL-scope auth_token' do
       create_account
       post '/api/v1/auth/authentication',
-           { username: account_data['username'], password: account_data['password'] }.to_json,
+           signed_body(username: account_data['username'], password: account_data['password']),
            json_header
       _(last_response.status).must_equal 200
 

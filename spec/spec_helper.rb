@@ -30,6 +30,13 @@ def auth_header_for(account, scope: FinanceTracker::AuthScope.new)
   { 'HTTP_AUTHORIZATION' => "Bearer #{auth_token_for(account, scope:)}" }
 end
 
+# Wrap a request body the way the Web App does: sign it so the API's
+# signature gate on /auth/* accepts it. The test env holds the signing half,
+# so specs can forge a valid client signature.
+def signed_body(body)
+  FinanceTracker::SignedRequest.sign(body).to_json
+end
+
 DATA = {} # rubocop:disable Style/MutableConstant
 DATA[:wallets] = YAML.safe_load_file('db/seeds/wallet_seed.yml')
 DATA[:categories] = YAML.safe_load_file('db/seeds/category_seed.yml')
