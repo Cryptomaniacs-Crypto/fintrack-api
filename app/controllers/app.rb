@@ -619,8 +619,6 @@ module FinanceTracker
               participants = normalize_split_participants(new_data[:participants] || new_data['participants'])
 
               routing.halt 400, { message: 'At least two participants are required' }.to_json if participants.count < 2
-              routing.halt 400, { message: 'You must be included as a participant' }.to_json unless
-                participants.any? { |entry| entry['name'] == current_account.username }
 
               agreement = SplitAgreement.create(
                 initiator_account_id: current_account.id,
