@@ -86,7 +86,9 @@ module FinanceTracker
       {
         id: id,
         creator_id: creator_id,
+        creator_username: creator&.username,
         recipient_id: recipient_id,
+        recipient_username: recipient&.username,
         amount: amount,
         reason_note: reason_note,
         dispute_note: dispute_note,
