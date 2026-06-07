@@ -24,7 +24,7 @@ describe 'Test SSO Authentication API' do
   describe 'POST /api/v1/auth/sso' do
     it 'HAPPY: a valid id_token creates an account and returns auth_token' do
       post '/api/v1/auth/sso',
-           { id_token: SsoTestKeys.mint_id_token }.to_json,
+           signed_body(id_token: SsoTestKeys.mint_id_token),
            json_header
 
       _(last_response.status).must_equal 200
@@ -43,7 +43,7 @@ describe 'Test SSO Authentication API' do
     it 'HAPPY: a repeat login with the same identity reuses the same account' do
       2.times do
         post '/api/v1/auth/sso',
-             { id_token: SsoTestKeys.mint_id_token }.to_json,
+             signed_body(id_token: SsoTestKeys.mint_id_token),
              json_header
       end
 
@@ -54,7 +54,7 @@ describe 'Test SSO Authentication API' do
 
     it 'HAPPY: returned auth_token carries FULL scope (SSO session = full access)' do
       post '/api/v1/auth/sso',
-           { id_token: SsoTestKeys.mint_id_token }.to_json,
+           signed_body(id_token: SsoTestKeys.mint_id_token),
            json_header
 
       token = JSON.parse(last_response.body)['auth_token']
@@ -63,8 +63,15 @@ describe 'Test SSO Authentication API' do
       _(scope.can_write?('wallets')).must_equal true
     end
 
+    it 'SECURITY: an unsigned request is rejected with 403' do
+      # Raw body with no { data, signature } envelope -- the app must sign it.
+      post '/api/v1/auth/sso', { id_token: SsoTestKeys.mint_id_token }.to_json, json_header
+
+      _(last_response.status).must_equal 403
+    end
+
     it 'BAD: a missing id_token is rejected with 400' do
-      post '/api/v1/auth/sso', {}.to_json, json_header
+      post '/api/v1/auth/sso', signed_body({}), json_header
 
       _(last_response.status).must_equal 400
       _(JSON.parse(last_response.body)['message']).wont_be_nil
@@ -72,7 +79,7 @@ describe 'Test SSO Authentication API' do
 
     it 'BAD: a malformed token is rejected with 401' do
       post '/api/v1/auth/sso',
-           { id_token: 'not-a-jwt' }.to_json,
+           signed_body(id_token: 'not-a-jwt'),
            json_header
 
       _(last_response.status).must_equal 401
@@ -80,7 +87,7 @@ describe 'Test SSO Authentication API' do
 
     it 'BAD: a token with wrong audience is rejected with 401' do
       post '/api/v1/auth/sso',
-           { id_token: SsoTestKeys.mint_id_token('aud' => 'wrong-client-id') }.to_json,
+           signed_body(id_token: SsoTestKeys.mint_id_token('aud' => 'wrong-client-id')),
            json_header
 
       _(last_response.status).must_equal 401
@@ -89,7 +96,7 @@ describe 'Test SSO Authentication API' do
     it 'SECURITY: a token signed by a different key is rejected with 401' do
       rogue_key = OpenSSL::PKey::RSA.generate(2048)
       post '/api/v1/auth/sso',
-           { id_token: SsoTestKeys.mint_id_token({}, rogue_key) }.to_json,
+           signed_body(id_token: SsoTestKeys.mint_id_token({}, rogue_key)),
            json_header
 
       _(last_response.status).must_equal 401
@@ -97,7 +104,7 @@ describe 'Test SSO Authentication API' do
 
     it 'SECURITY: an expired token is rejected with 401' do
       expired_token = SsoTestKeys.mint_id_token('exp' => Time.now.to_i - 1)
-      post '/api/v1/auth/sso', { id_token: expired_token }.to_json, json_header
+      post '/api/v1/auth/sso', signed_body(id_token: expired_token), json_header
 
       _(last_response.status).must_equal 401
     end

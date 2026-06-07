@@ -6,6 +6,7 @@ require 'figaro'
 require 'sequel'
 require_relative '../app/lib/secure_db'
 require_relative '../app/lib/auth_token'
+require_relative '../app/lib/signed_request'
 
 module FinanceTracker
   class Api < Roda
@@ -30,6 +31,9 @@ module FinanceTracker
       # Load crypto keys
       SecureDB.setup(ENV.delete('SECURE_DB_KEY'), ENV.delete('SECURE_HASH_KEY'))
       AuthToken.setup(ENV.delete('TOKEN_KEY'))
+      # Signing half is nil outside test: only the app holds a SIGNING_KEY,
+      # so the API can verify signed requests but never forge them.
+      SignedRequest.setup(ENV.delete('VERIFY_KEY'), ENV.delete('SIGNING_KEY'))
 
       # Custom events logging
       LOGGER = Logger.new($stderr)
