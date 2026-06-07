@@ -15,6 +15,7 @@ require_relative '../models/google_account'
 require_relative '../models/role'
 require_relative '../models/authorized_account'
 require_relative '../models/sso_identity'
+require_relative '../models/split_agreement'
 require_relative '../services/get_account_by_username'
 require_relative '../services/find_account_by_email'
 require_relative '../services/create_account'
@@ -592,6 +593,120 @@ module FinanceTracker
           end
 
         end
+
+        routing.on 'split-agreements' do
+          current_account = current_account_from_auth
+          routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+
+          routing.is do
+            # GET api/v1/split-agreements
+            routing.get do
+              agreements = SplitAgreement.all.select do |agreement|
+                agreement.initiator_username == current_account.username || agreement.participant?(current_account.username)
+              end
+
+              { data: agreements.map(&:to_h) }.to_json
+            rescue StandardError => e
+              Api.logger.error "UNKNOWN ERROR: #{e.message}"
+              routing.halt 500, { message: 'Unknown server error' }.to_json
+            end
+
+            # POST api/v1/split-agreements
+            routing.post do
+              scope_allows_write!(routing, 'transactions')
+              request = HttpRequest.new(routing)
+              new_data = request.body_data
+              participants = normalize_split_participants(new_data[:participants] || new_data['participants'])
+
+              routing.halt 400, { message: 'At least two participants are required' }.to_json if participants.count < 2
+              routing.halt 400, { message: 'You must be included as a participant' }.to_json unless
+                participants.any? { |entry| entry['name'] == current_account.username }
+
+              agreement = SplitAgreement.create(
+                initiator_account_id: current_account.id,
+                initiator_username: current_account.username,
+                participants_json: JSON.generate(participants),
+                tax_percent: (new_data[:tax_percent] || new_data['tax_percent'] || '0.0').to_s,
+                service_percent: (new_data[:service_percent] || new_data['service_percent'] || '0.0').to_s,
+                grand_total: (new_data[:grand_total] || new_data['grand_total'] || '0.0').to_s,
+                status: 'pending'
+              )
+
+              response.status = 201
+              response['Location'] = "#{@api_root}/split-agreements/#{agreement.id}"
+              { data: { type: 'split_agreement', attributes: agreement.to_h } }.to_json
+            rescue JSON::ParserError, Sequel::MassAssignmentRestriction => e
+              routing.halt 400, { message: e.message.empty? ? 'Invalid request body' : e.message }.to_json
+            rescue StandardError => e
+              Api.logger.error "UNKNOWN ERROR: #{e.message}"
+              routing.halt 500, { message: 'Unknown server error' }.to_json
+            end
+          end
+
+          routing.on String do |agreement_id|
+            agreement = SplitAgreement.first(id: agreement_id)
+            routing.halt 404, { message: 'Split agreement not found' }.to_json unless agreement
+            routing.halt 403, { message: 'Not allowed to access this split agreement' }.to_json unless
+              agreement.initiator_username == current_account.username || agreement.participant?(current_account.username)
+
+            # GET api/v1/split-agreements/[id]
+            routing.get do
+              { data: { type: 'split_agreement', attributes: agreement.to_h } }.to_json
+            end
+
+            # POST api/v1/split-agreements/[id]/agree
+            routing.post 'agree' do
+              scope_allows_write!(routing, 'transactions')
+              routing.halt 403, { message: 'Only participants can agree' }.to_json unless agreement.participant?(current_account.username)
+
+              agreement.mark_agreed!(current_account.username)
+              { data: { type: 'split_agreement', attributes: agreement.to_h } }.to_json
+            rescue StandardError => e
+              routing.halt 400, { message: e.message }.to_json
+            end
+
+            # POST api/v1/split-agreements/[id]/mark-paid
+            routing.post 'mark-paid' do
+              scope_allows_write!(routing, 'transactions')
+              routing.halt 403, { message: 'Only participants can mark paid' }.to_json unless agreement.participant?(current_account.username)
+
+              agreement.mark_paid!(current_account.username)
+              { data: { type: 'split_agreement', attributes: agreement.to_h } }.to_json
+            rescue StandardError => e
+              routing.halt 400, { message: e.message }.to_json
+            end
+
+            # POST api/v1/split-agreements/[id]/dispute
+            routing.post 'dispute' do
+              scope_allows_write!(routing, 'transactions')
+              routing.halt 403, { message: 'Only participants can dispute' }.to_json unless agreement.participant?(current_account.username)
+
+              payload = HttpRequest.new(routing).body_data
+              reason = payload[:reason] || payload['reason']
+              routing.halt 400, { message: 'Dispute reason is required' }.to_json if reason.to_s.strip.empty?
+
+              agreement.mark_disputed!(current_account.username, reason)
+              { data: { type: 'split_agreement', attributes: agreement.to_h } }.to_json
+            rescue JSON::ParserError => e
+              routing.halt 400, { message: e.message }.to_json
+            rescue StandardError => e
+              routing.halt 400, { message: e.message }.to_json
+            end
+
+            # POST api/v1/split-agreements/[id]/finalize
+            routing.post 'finalize' do
+              scope_allows_write!(routing, 'transactions')
+              routing.halt 403, { message: 'Only initiator can finalize' }.to_json unless agreement.initiator_username == current_account.username
+              routing.halt 409, { message: 'Cannot finalize disputed agreement' }.to_json if agreement.disputed?
+              routing.halt 409, { message: 'All participants must agree before finalizing' }.to_json unless agreement.all_participants_agreed?
+
+              agreement.finalize!
+              { data: { type: 'split_agreement', attributes: agreement.to_h } }.to_json
+            rescue StandardError => e
+              routing.halt 400, { message: e.message }.to_json
+            end
+          end
+        end
       end
     end
 
@@ -621,6 +736,24 @@ module FinanceTracker
       return if auth_scope.can_write?(resource)
 
       routing.halt 403, { message: "Auth token scope does not permit writing #{resource}" }.to_json
+    end
+
+    def normalize_split_participants(rows)
+      Array(rows).map do |row|
+        name = (row[:name] || row['name']).to_s.strip
+        amount = (row[:amount] || row['amount']).to_s.strip
+        total = (row[:total] || row['total'] || amount).to_s.strip
+        next if name.empty? || amount.empty?
+
+        {
+          'name' => name,
+          'amount' => amount,
+          'total' => total,
+          'agreed' => false,
+          'paid' => false,
+          'disputed' => false
+        }
+      end.compact
     end
   end
 end
