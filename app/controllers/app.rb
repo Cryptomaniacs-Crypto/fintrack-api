@@ -544,10 +544,13 @@ module FinanceTracker
             end
           end
 
-          # GET api/v1/transactions
+          # GET api/v1/transactions[?wallet_id=]
           routing.get do
             current_account = current_account_from_auth
-            transactions = current_account ? ::FinanceTracker::TransactionScope.new(current_account).viewable.all : Transaction.all
+            scope = current_account ? ::FinanceTracker::TransactionScope.new(current_account).viewable : Transaction
+            wallet_id = routing.params['wallet_id']
+            scope = scope.where(wallet_id: wallet_id) if wallet_id
+            transactions = scope.order(Sequel.desc(:transaction_date)).all
             payload = transactions.map do |transaction|
               envelope = JSON.parse(transaction.to_json)
               envelope['policies'] = ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope).index_summary if current_account

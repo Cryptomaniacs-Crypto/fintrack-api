@@ -67,6 +67,7 @@ module FinanceTracker
             attributes: {
               id:,
               name:,
+              method_type:,
               account_number:,
               balance:
             }
