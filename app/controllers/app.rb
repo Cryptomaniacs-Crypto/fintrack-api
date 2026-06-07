@@ -129,13 +129,36 @@ module FinanceTracker
           @account_route = "#{@api_root}/accounts"
 
           routing.is do
-            # GET api/v1/accounts?email=... (search by email via HMAC hash)
             routing.get do
               email = routing.params['email']
-              routing.halt 400, { message: 'email query param required' }.to_json unless email
 
-              account = FindAccountByEmail.call(email:)
-              account ? account.to_json : routing.halt(404, { message: 'Account not found' }.to_json)
+              if email
+                # GET api/v1/accounts?email=... (search by email via HMAC hash)
+                account = FindAccountByEmail.call(email:)
+                next(account ? account.to_json : routing.halt(404, { message: 'Account not found' }.to_json))
+              end
+
+              # GET api/v1/accounts  (admin-only index)
+              current_account = current_account_from_auth
+              routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+              routing.halt 403, { message: 'Admins only' }.to_json unless
+                ::FinanceTracker::AccountPolicy.new(current_account, current_account, auth_scope: auth_scope).is_admin?
+
+              role_filter = routing.params['role']
+              sort = routing.params['sort']
+
+              accounts = Account.all
+              accounts = accounts.select { |a| a.system_roles.map(&:name).include?(role_filter) } if role_filter && role_filter != 'none'
+              accounts = accounts.select { |a| a.system_roles.empty? } if role_filter == 'none'
+              accounts = accounts.sort_by { |a| a.system_roles.map(&:name).min || 'zzz' } if sort == 'role'
+              accounts = accounts.sort_by(&:username) if sort == 'username'
+
+              {
+                data: accounts.map do |a|
+                  roles = a.system_roles.map { |r| { id: r.id, name: r.name } }
+                  JSON.parse(a.to_json).merge('roles' => roles)
+                end
+              }.to_json
             rescue StandardError => e
               Api.logger.error "UNKNOWN ERROR: #{e.message}"
               routing.halt 500, { message: 'Unknown server error' }.to_json
@@ -194,25 +217,36 @@ module FinanceTracker
                 routing.halt 404, { message: e.message }.to_json
               end
 
-              # POST api/v1/accounts/[username]/roles/[role_name]
-              routing.post String do |role_name|
+              routing.on String do |role_name|
                 current_account = current_account_from_auth
                 target = Account.first(username:)
-                if current_account
-                  routing.halt(403, { message: 'Only admins can manage system roles' }.to_json) unless
-                    ::FinanceTracker::SystemRolePolicy.new(current_account, target, auth_scope: auth_scope).can_manage?
+                routing.halt 404, { message: 'Account not found' }.to_json unless target
+                routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+                routing.halt(403, { message: 'Only admins can manage system roles' }.to_json) unless
+                  ::FinanceTracker::SystemRolePolicy.new(current_account, target, auth_scope: auth_scope).can_manage?
+
+                # POST api/v1/accounts/[username]/roles/[role_name]
+                routing.post do
+                  assigned_role = AssignRoleToAccount.call(username:, role_name:)
+                  response.status = 201
+                  response['Location'] = "#{@account_roles_route}/#{assigned_role.name}"
+                  assigned_role.to_json
+                rescue AssignRoleToAccount::AccountNotFoundError,
+                       AssignRoleToAccount::RoleNotFoundError => e
+                  routing.halt 404, { message: e.message }.to_json
+                rescue AssignRoleToAccount::RoleAlreadyAssignedError => e
+                  routing.halt 409, { message: e.message }.to_json
                 end
 
-                assigned_role = AssignRoleToAccount.call(username:, role_name:)
+                # DELETE api/v1/accounts/[username]/roles/[role_name]
+                routing.delete do
+                  routing.halt 400, { message: 'Unknown role' }.to_json unless %w[admin creator member].include?(role_name)
+                  role = Role.first(name: role_name)
+                  routing.halt 404, { message: 'Role not assigned' }.to_json unless role && target.system_roles.include?(role)
 
-                response.status = 201
-                response['Location'] = "#{@account_roles_route}/#{assigned_role.name}"
-                assigned_role.to_json
-              rescue AssignRoleToAccount::AccountNotFoundError,
-                     AssignRoleToAccount::RoleNotFoundError => e
-                routing.halt 404, { message: e.message }.to_json
-              rescue AssignRoleToAccount::RoleAlreadyAssignedError => e
-                routing.halt 409, { message: e.message }.to_json
+                  target.remove_system_role(role)
+                  { message: 'System role revoked', data: JSON.parse(target.to_json) }.to_json
+                end
               end
 
             end
