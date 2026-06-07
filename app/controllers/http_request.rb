@@ -3,6 +3,7 @@
 require 'json'
 
 require_relative '../lib/auth_token'
+require_relative '../lib/signed_request'
 require_relative '../models/authorized_account'
 
 module FinanceTracker
@@ -17,6 +18,13 @@ module FinanceTracker
         raw = @routing.body&.read.to_s
         raw.empty? ? {} : JSON.parse(raw, symbolize_names: true)
       end
+    end
+
+    # Verifies the request signature and returns the inner data (symbol-keyed),
+    # or raises SignedRequest::VerificationError. Used for POSTs that carry no
+    # auth_token (login, register, SSO), which must be signed by the app.
+    def signed_body_data
+      SignedRequest.parse(body_data)
     end
 
     def auth_token
