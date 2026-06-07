@@ -155,8 +155,9 @@ module FinanceTracker
 
               {
                 data: accounts.map do |a|
-                  roles = a.system_roles.map { |r| { id: r.id, name: r.name } }
-                  JSON.parse(a.to_json).merge('roles' => roles)
+                  entry = JSON.parse(a.to_json)
+                  entry['included'] = { 'system_roles' => a.system_roles.map { |r| { 'id' => r.id, 'name' => r.name } } }
+                  entry
                 end
               }.to_json
             rescue StandardError => e
