@@ -47,7 +47,7 @@ module FinanceTracker
       return unless requester.id == target.id
 
       envelope['capabilities'] = policy.capabilities
-      envelope['auth_token'] = AuthorizedAccount.new(envelope, mint_scope, account_id: target.id).token
+      envelope['account_api_token'] = AuthorizedAccount.new(envelope, mint_scope, account_id: target.id).token
     end
 
     def self.requester_for(auth)

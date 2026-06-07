@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require_relative '../lib/auth_scope'
 
 module FinanceTracker
   # Verify a Google-signed id_token, resolve it to an account, and issue a
@@ -19,6 +20,7 @@ module FinanceTracker
       envelope['policies'] = policy.summary
       envelope['capabilities'] = policy.capabilities
       envelope['auth_token'] = AuthorizedAccount.new(envelope, AuthScope.new, account_id: account.id).token
+      envelope['account_api_token'] = AuthorizedAccount.new(envelope, AuthScope::READ_ONLY, account_id: account.id).token
       envelope
     end
   end

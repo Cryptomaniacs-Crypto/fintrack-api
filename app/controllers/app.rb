@@ -78,6 +78,8 @@ module FinanceTracker
             envelope['capabilities'] = policy.capabilities
             # Login issues a FULL-scope session token (write implies read).
             envelope['auth_token'] = AuthorizedAccount.new(envelope, AuthScope.new, account_id: account.id).token
+            # Also mint a READ_ONLY API key the app can forward on behalf of the user.
+            envelope['account_api_token'] = AuthorizedAccount.new(envelope, AuthScope::READ_ONLY, account_id: account.id).token
             JSON.generate(envelope)
           rescue AuthenticateAccount::UnauthorizedError => e
             routing.halt 401, { message: e.message }.to_json
