@@ -544,6 +544,59 @@ module FinanceTracker
             rescue StandardError => e
               routing.halt 404, { message: e.message }.to_json
             end
+
+            # PATCH api/v1/transactions/[transaction_id]
+            routing.patch do
+              data = HttpRequest.new(routing).body_data
+              current_account = current_account_from_auth
+              scope_allows_write!(routing, 'transactions')
+
+              transaction = Transaction.first(id: transaction_id)
+              routing.halt 404, { message: 'Transaction not found' }.to_json unless transaction
+
+              if current_account
+                policy = ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope)
+                routing.halt 403, { message: 'Not authorized' }.to_json unless policy.can_edit?
+              end
+
+              amount_val = data.delete('amount') || data.delete(:amount)
+              safe = data.slice('title', 'transaction_date', 'note', 'category_id')
+                        .transform_keys(&:to_sym)
+              transaction.update(safe) unless safe.empty?
+
+              if amount_val
+                transaction.amount = amount_val.to_s
+                transaction.save_changes
+              end
+
+              response.status = 200
+              envelope = JSON.parse(transaction.to_json)
+              { message: 'Transaction updated', data: envelope }.to_json
+            rescue StandardError => e
+              Api.logger.error "PATCH TRANSACTION ERROR: #{e.message}"
+              routing.halt 500, { message: e.message }.to_json
+            end
+
+            # DELETE api/v1/transactions/[transaction_id]
+            routing.delete do
+              current_account = current_account_from_auth
+              scope_allows_write!(routing, 'transactions')
+
+              transaction = Transaction.first(id: transaction_id)
+              routing.halt 404, { message: 'Transaction not found' }.to_json unless transaction
+
+              if current_account
+                policy = ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope)
+                routing.halt 403, { message: 'Not authorized' }.to_json unless policy.can_delete?
+              end
+
+              transaction.destroy
+              response.status = 204
+              nil
+            rescue StandardError => e
+              Api.logger.error "DELETE TRANSACTION ERROR: #{e.message}"
+              routing.halt 500, { message: e.message }.to_json
+            end
           end
 
           # GET api/v1/transactions[?wallet_id=]
