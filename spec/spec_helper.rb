@@ -5,7 +5,10 @@ require 'date'
 require 'yaml'
 require_relative 'test_load_all'
 
-TABLES_TO_WIPE = %i[split_agreements sso_identities accounts_roles accounts roles transactions wallets categories].freeze
+TABLES_TO_WIPE = %i[
+  bill_split_item_shares bill_split_items bill_split_participants bill_splits
+  sso_identities accounts_roles accounts roles transactions wallets categories
+].freeze
 
 def wipe_database
   TABLES_TO_WIPE.each do |table_name|

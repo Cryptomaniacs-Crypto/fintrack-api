@@ -1,114 +1,168 @@
 # frozen_string_literal: true
 
+require 'bigdecimal'
 require 'json'
 require 'sequel'
 require_relative '../lib/secure_db'
 
 module FinanceTracker
-  # Tracks a two-party bill split between a creator and a recipient.
-  # reason_note and dispute_note are encrypted at rest via SecureDB.
+  # An itemized, multi-person bill split owned by `creator`. Holds many
+  # participants and many dishes (items); each dish is split equally among the
+  # participants who shared it, then bill-wide tax/service percentages are
+  # applied proportionally to each person's subtotal.
+  #
+  # Lifecycle: draft -> pending (sent to participants) -> disputed (someone
+  # rejected) -> settled. Owner edits are allowed only while editable? (draft or
+  # disputed) and reset every participant back to pending.
   class BillSplit < Sequel::Model
     many_to_one :creator, class: :'FinanceTracker::Account', key: :creator_id
-    many_to_one :recipient, class: :'FinanceTracker::Account', key: :recipient_id
+    one_to_many :participants, class: :'FinanceTracker::BillSplitParticipant', key: :bill_split_id
+    one_to_many :items, class: :'FinanceTracker::BillSplitItem', key: :bill_split_id
 
     plugin :uuid, field: :id
     plugin :timestamps, update_on_create: true
     plugin :whitelist_security
-    set_allowed_columns :creator_id, :recipient_id, :amount,
-                        :reason_note_secure, :dispute_note_secure,
-                        :status, :recipient_agreed_at, :settled_at
+    set_allowed_columns :creator_id, :title, :tax_percent, :service_percent
 
-    # reason_note is sensitive: stored encrypted, exposed as plaintext virtual attr.
-    def reason_note
-      SecureDB.decrypt(reason_note_secure)
+    # note is an optional sensitive free-text field, encrypted at rest.
+    def note
+      SecureDB.decrypt(note_secure)
     end
 
-    def reason_note=(plaintext)
-      self.reason_note_secure = SecureDB.encrypt(plaintext.to_s.strip)
-    end
-
-    # dispute_note is sensitive: stored encrypted when present.
-    def dispute_note
-      SecureDB.decrypt(dispute_note_secure)
-    end
-
-    def dispute_note=(plaintext)
+    def note=(plaintext)
       stripped = plaintext.to_s.strip
-      self.dispute_note_secure = stripped.empty? ? nil : SecureDB.encrypt(stripped)
+      self.note_secure = stripped.empty? ? nil : SecureDB.encrypt(stripped)
     end
 
-    # Authorization predicates — used by controllers and policies.
+    # Status predicates
+    def draft?    = status == 'draft'
+    def pending?  = status == 'pending'
+    def disputed? = status == 'disputed'
+    def settled?  = status == 'settled'
+
+    # Editing (and deleting) is allowed only before settlement.
+    def editable? = draft? || disputed?
+
+    # Authorization helpers
     def creator?(account)
       account&.id == creator_id
     end
 
-    def recipient?(account)
-      account&.id == recipient_id
+    def participant_for(account)
+      participants.find { |p| p.account_id == account&.id }
     end
 
     def participant?(account)
-      creator?(account) || recipient?(account)
+      creator?(account) || !participant_for(account).nil?
     end
 
-    # Status predicates
-    def pending? = status == 'pending'
-    def agreed?  = status == 'agreed'
-    def settled? = status == 'settled'
-
-    # Recipient agrees to the amount. Status moves to 'agreed'.
-    def agree!
+    # Send the bill to participants. Requires at least one dish.
+    # (Status columns are whitelist-restricted, so set via individual setters.)
+    def send!
+      raise 'Add at least one dish before sending' if items.empty?
       raise 'Bill split is already settled' if settled?
 
-      update(status: 'agreed', recipient_agreed_at: Time.now.utc)
-      self
-    end
-
-    # Recipient raises a dispute. Status stays 'pending'; creator may revise.
-    def dispute!(reason)
-      raise 'Bill split is already settled' if settled?
-      raise 'Dispute reason is required' if reason.to_s.strip.empty?
-
-      self.dispute_note = reason
+      self.status = 'pending'
+      self.sent_at ||= Time.now.utc
       save_changes
       self
     end
 
-    # Either party marks the split settled after out-of-app payment.
-    # Settled records become read-only.
+    # An owner edit moves a disputed/pending bill back to a clean pending review.
+    def reset_participants!
+      participants.each(&:reset!)
+      self
+    end
+
+    # A participant rejection pushes the whole bill into the disputed state so
+    # the owner can revise it.
+    def mark_disputed!
+      return self if settled?
+
+      self.status = 'disputed'
+      save_changes
+      self
+    end
+
     def settle!
       raise 'Bill split is already settled' if settled?
 
-      update(status: 'settled', settled_at: Time.now.utc)
+      self.status = 'settled'
+      self.settled_at = Time.now.utc
+      save_changes
+      participants.each(&:settle!)
       self
+    end
+
+    # Per-participant money breakdown. Rounds once per person at the end.
+    def breakdown
+      tax = to_decimal(tax_percent)
+      service = to_decimal(service_percent)
+
+      participants.map do |participant|
+        subtotal = participant.items.sum(BigDecimal('0'), &:share_amount)
+        tax_amount = (subtotal * tax / 100).round(2)
+        service_amount = (subtotal * service / 100).round(2)
+        {
+          participant_id: participant.id,
+          account_id: participant.account_id,
+          username: participant.account&.username,
+          status: participant.status,
+          reject_note: participant.reject_note,
+          subtotal: money(subtotal),
+          tax: money(tax_amount),
+          service: money(service_amount),
+          total: money(subtotal + tax_amount + service_amount)
+        }
+      end
+    end
+
+    def grand_total
+      money(breakdown.sum(BigDecimal('0')) { |row| BigDecimal(row[:total]) })
     end
 
     def to_h
       {
-        id: id,
-        creator_id: creator_id,
+        id:,
+        title:,
+        note:,
+        tax_percent:,
+        service_percent:,
+        status:,
+        creator_id:,
         creator_username: creator&.username,
-        recipient_id: recipient_id,
-        recipient_username: recipient&.username,
-        amount: amount,
-        reason_note: reason_note,
-        dispute_note: dispute_note,
-        status: status,
-        recipient_agreed_at: recipient_agreed_at,
-        settled_at: settled_at,
-        created_at: created_at,
-        updated_at: updated_at
+        grand_total:,
+        sent_at:,
+        settled_at:,
+        created_at:,
+        updated_at:,
+        participants: breakdown,
+        items: items.map do |item|
+          {
+            id: item.id,
+            name: item.name,
+            amount: item.amount,
+            sharer_participant_ids: item.participants.map(&:id),
+            sharer_usernames: item.participants.map { |p| p.account&.username }
+          }
+        end
       }
     end
 
     def to_json(options = {})
-      JSON(
-        {
-          data: {
-            type: 'bill_split',
-            attributes: to_h
-          }
-        }, options
-      )
+      JSON({ data: { type: 'bill_split', attributes: to_h } }, options)
+    end
+
+    private
+
+    def to_decimal(value)
+      BigDecimal(value.to_s)
+    rescue ArgumentError
+      BigDecimal('0')
+    end
+
+    def money(value)
+      value.round(2).to_s('F')
     end
   end
 end

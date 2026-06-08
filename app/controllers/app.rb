@@ -16,6 +16,8 @@ require_relative '../models/role'
 require_relative '../models/authorized_account'
 require_relative '../models/sso_identity'
 require_relative '../models/bill_split'
+require_relative '../models/bill_split_participant'
+require_relative '../models/bill_split_item'
 require_relative '../services/get_account_by_username'
 require_relative '../services/find_account_by_email'
 require_relative '../services/create_account'
@@ -26,6 +28,8 @@ require_relative '../services/find_or_create_sso_account'
 require_relative '../services/verify_registration'
 require_relative '../services/assign_role_to_account'
 require_relative '../services/list_account_roles'
+require_relative '../services/create_bill_split'
+require_relative '../services/update_bill_split'
 require_relative '../policies/account_policy'
 require_relative '../policies/account_scope'
 require_relative '../policies/category_policy'
@@ -40,6 +44,10 @@ module FinanceTracker
   # Web controller for Finance Tracker API
   class Api < Roda
     plugin :halt
+    # Enables routing.patch / routing.delete / routing.put (Roda core only
+    # ships get/post). Required by the transaction, role, and bill-split
+    # mutation routes below.
+    plugin :all_verbs
 
     route do |routing|
       response['Content-Type'] = 'application/json'
@@ -657,43 +665,37 @@ module FinanceTracker
           routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
 
           routing.is do
-            # GET api/v1/bill-splits — list splits where current account is creator or recipient
+            # GET api/v1/bill-splits — splits where current account is creator or participant
             routing.get do
-              splits = BillSplit.where(creator_id: current_account.id).all +
-                       BillSplit.where(recipient_id: current_account.id).all
-              { data: splits.map(&:to_h) }.to_json
+              created = BillSplit.where(creator_id: current_account.id).all
+              shared_ids = BillSplitParticipant.where(account_id: current_account.id).select_map(:bill_split_id)
+              shared = shared_ids.empty? ? [] : BillSplit.where(id: shared_ids).all
+              bills = (created + shared).uniq(&:id).sort_by { |bill| bill.created_at.to_s }.reverse
+              { data: bills.map(&:to_h) }.to_json
             rescue StandardError => e
               Api.logger.error "UNKNOWN ERROR: #{e.message}"
               routing.halt 500, { message: 'Unknown server error' }.to_json
             end
 
-            # POST api/v1/bill-splits — create a new split (creator = current account)
+            # POST api/v1/bill-splits — create a draft (creator + named participants)
             routing.post do
               scope_allows_write!(routing, 'transactions')
               payload = HttpRequest.new(routing).body_data
 
-              recipient_username = (payload[:recipient_username] || payload['recipient_username']).to_s.strip
-              routing.halt 400, { message: 'recipient_username is required' }.to_json if recipient_username.empty?
-
-              recipient = Account.first(username: recipient_username)
-              routing.halt 404, { message: 'Recipient account not found' }.to_json unless recipient
-              routing.halt 400, { message: 'Cannot create a split with yourself' }.to_json if recipient.id == current_account.id
-
-              amount = (payload[:amount] || payload['amount']).to_s.strip
-              routing.halt 400, { message: 'amount is required' }.to_json if amount.empty?
-
-              reason = (payload[:reason_note] || payload['reason_note']).to_s.strip
-              routing.halt 400, { message: 'reason_note is required' }.to_json if reason.empty?
-
-              split = BillSplit.new(creator_id: current_account.id, recipient_id: recipient.id, amount:)
-              split.reason_note = reason
-              split.save_changes
+              bill = CreateBillSplit.call(
+                creator: current_account,
+                title: payload[:title] || payload['title'],
+                participant_usernames: payload[:participant_usernames] || payload['participant_usernames'],
+                note: payload[:note] || payload['note']
+              )
 
               response.status = 201
-              response['Location'] = "#{@api_root}/bill-splits/#{split.id}"
-              split.to_json
-            rescue Sequel::MassAssignmentRestriction
-              routing.halt 400, { message: 'Illegal attributes' }.to_json
+              response['Location'] = "#{@api_root}/bill-splits/#{bill.id}"
+              bill.to_json
+            rescue CreateBillSplit::UnknownParticipant => e
+              routing.halt 404, { message: e.message }.to_json
+            rescue CreateBillSplit::InvalidInput => e
+              routing.halt 400, { message: e.message }.to_json
             rescue JSON::ParserError
               routing.halt 400, { message: 'Invalid JSON body' }.to_json
             rescue StandardError => e
@@ -703,74 +705,97 @@ module FinanceTracker
           end
 
           routing.on String do |split_id|
-            split = BillSplit.first(id: split_id)
-            routing.halt 404, { message: 'Bill split not found' }.to_json unless split
-            routing.halt 403, { message: 'Not authorized to access this bill split' }.to_json unless split.participant?(current_account)
+            bill = BillSplit.first(id: split_id)
+            routing.halt 404, { message: 'Bill split not found' }.to_json unless bill
+            routing.halt 403, { message: 'Not authorized to access this bill split' }.to_json unless bill.participant?(current_account)
 
-            # GET api/v1/bill-splits/[id]
-            routing.get do
-              split.to_json
+            routing.is do
+              # GET api/v1/bill-splits/[id] — detail + per-person breakdown
+              routing.get do
+                bill.to_json
+              end
+
+              # PATCH api/v1/bill-splits/[id] — creator edits dishes/tax/service while editable
+              routing.patch do
+                scope_allows_write!(routing, 'transactions')
+                routing.halt 403, { message: 'Only the creator can edit a bill split' }.to_json unless bill.creator?(current_account)
+
+                payload = HttpRequest.new(routing).body_data
+                updated = UpdateBillSplit.call(
+                  bill_split: bill,
+                  title: payload[:title] || payload['title'],
+                  tax_percent: payload[:tax_percent] || payload['tax_percent'],
+                  service_percent: payload[:service_percent] || payload['service_percent'],
+                  note: payload[:note] || payload['note'],
+                  items: payload[:items] || payload['items']
+                )
+                updated.to_json
+              rescue UpdateBillSplit::NotEditable => e
+                routing.halt 409, { message: e.message }.to_json
+              rescue UpdateBillSplit::InvalidInput => e
+                routing.halt 400, { message: e.message }.to_json
+              end
+
+              # DELETE api/v1/bill-splits/[id] — creator may delete while not settled
+              routing.delete do
+                scope_allows_write!(routing, 'transactions')
+                routing.halt 403, { message: 'Only the creator can delete a bill split' }.to_json unless bill.creator?(current_account)
+                routing.halt 409, { message: 'Settled records cannot be deleted' }.to_json if bill.settled?
+
+                bill.destroy
+                { message: 'Bill split deleted' }.to_json
+              end
             end
 
-            # PATCH api/v1/bill-splits/[id] — creator may edit amount/reason while not settled
-            routing.patch do
+            # POST api/v1/bill-splits/[id]/send — creator sends draft to participants
+            routing.post 'send' do
               scope_allows_write!(routing, 'transactions')
-              routing.halt 403, { message: 'Only the creator can edit a bill split' }.to_json unless split.creator?(current_account)
-              routing.halt 409, { message: 'Settled records cannot be modified' }.to_json if split.settled?
+              routing.halt 403, { message: 'Only the creator can send a bill split' }.to_json unless bill.creator?(current_account)
 
-              payload = HttpRequest.new(routing).body_data
-              split.amount = payload[:amount].to_s if payload[:amount] || payload['amount']
-              split.reason_note = payload[:reason_note] || payload['reason_note'] if payload[:reason_note] || payload['reason_note']
-              split.save_changes
-              split.to_json
+              bill.send!
+              bill.reload.to_json
             rescue StandardError => e
               routing.halt 400, { message: e.message }.to_json
             end
 
-            # DELETE api/v1/bill-splits/[id] — creator may delete while not settled
-            routing.delete do
-              scope_allows_write!(routing, 'transactions')
-              routing.halt 403, { message: 'Only the creator can delete a bill split' }.to_json unless split.creator?(current_account)
-              routing.halt 409, { message: 'Settled records cannot be deleted' }.to_json if split.settled?
-
-              split.destroy
-              { message: 'Bill split deleted' }.to_json
-            rescue StandardError => e
-              routing.halt 400, { message: e.message }.to_json
-            end
-
-            # POST api/v1/bill-splits/[id]/agree — recipient agrees to the amount
+            # POST api/v1/bill-splits/[id]/agree — a participant agrees to their share
             routing.post 'agree' do
               scope_allows_write!(routing, 'transactions')
-              routing.halt 403, { message: 'Only the recipient can agree' }.to_json unless split.recipient?(current_account)
+              participant = bill.participant_for(current_account)
+              routing.halt 403, { message: 'Only a participant can agree' }.to_json unless participant
+              routing.halt 409, { message: 'Bill split is already settled' }.to_json if bill.settled?
 
-              split.agree!
-              split.to_json
+              participant.agree!
+              bill.reload.to_json
             rescue StandardError => e
               routing.halt 400, { message: e.message }.to_json
             end
 
-            # POST api/v1/bill-splits/[id]/dispute — recipient disputes, provides reason
-            routing.post 'dispute' do
+            # POST api/v1/bill-splits/[id]/reject — a participant rejects with a note
+            routing.post 'reject' do
               scope_allows_write!(routing, 'transactions')
-              routing.halt 403, { message: 'Only the recipient can dispute' }.to_json unless split.recipient?(current_account)
+              participant = bill.participant_for(current_account)
+              routing.halt 403, { message: 'Only a participant can reject' }.to_json unless participant
+              routing.halt 409, { message: 'Bill split is already settled' }.to_json if bill.settled?
 
               payload = HttpRequest.new(routing).body_data
               reason = (payload[:reason] || payload['reason']).to_s.strip
-              routing.halt 400, { message: 'Dispute reason is required' }.to_json if reason.empty?
+              routing.halt 400, { message: 'Reject reason is required' }.to_json if reason.empty?
 
-              split.dispute!(reason)
-              split.to_json
+              participant.reject!(reason)
+              bill.mark_disputed!
+              bill.reload.to_json
             rescue StandardError => e
               routing.halt 400, { message: e.message }.to_json
             end
 
-            # POST api/v1/bill-splits/[id]/settle — either party marks settled after out-of-app payment
+            # POST api/v1/bill-splits/[id]/settle — creator locks the bill as settled
             routing.post 'settle' do
               scope_allows_write!(routing, 'transactions')
+              routing.halt 403, { message: 'Only the creator can settle a bill split' }.to_json unless bill.creator?(current_account)
 
-              split.settle!
-              split.to_json
+              bill.settle!
+              bill.reload.to_json
             rescue StandardError => e
               routing.halt 400, { message: e.message }.to_json
             end
