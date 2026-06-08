@@ -52,25 +52,26 @@ module FinanceTracker
 
     def send_email
       response = HTTP
-                 .auth("Bearer #{api_key}")
-                 .post(mail_url, json: mail_json)
+                 .basic_auth(user: 'api', pass: api_key)
+                 .post(mail_url, form: mail_params)
       return if response.status < 300
 
-      Api.logger.error("Resend error #{response.status}: #{response.body}")
+      Api.logger.error("Mailgun error #{response.status}: #{response.body}")
       raise EmailProviderError, 'Email provider rejected the request'
     end
 
-    def api_key = ENV.fetch('RESEND_API_KEY')
-    def mail_url = ENV.fetch('RESEND_API_URL')
-    def from_email = ENV.fetch('RESEND_FROM_EMAIL')
-    def from_name = ENV.fetch('RESEND_FROM_NAME', 'Fintrack')
+    def api_key    = ENV.fetch('MAILGUN_API_KEY')
+    def domain     = ENV.fetch('MAILGUN_DOMAIN')
+    def mail_url   = "https://api.mailgun.net/v3/#{domain}/messages"
+    def from_email = ENV.fetch('MAILGUN_FROM_EMAIL')
+    def from_name  = ENV.fetch('MAILGUN_FROM_NAME', 'Fintrack')
 
-    def mail_json
+    def mail_params
       {
-        from: "#{from_name} <#{from_email}>",
-        to: [email],
+        from:    "#{from_name} <#{from_email}>",
+        to:      email,
         subject: 'Fintrack Registration Verification',
-        html: html_body
+        html:    html_body
       }
     end
 

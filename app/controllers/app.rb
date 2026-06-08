@@ -31,6 +31,7 @@ require_relative '../services/list_account_roles'
 require_relative '../services/create_bill_split'
 require_relative '../services/update_bill_split'
 require_relative '../services/send_bill_split'
+require_relative '../services/notify_bill_split'
 require_relative '../services/pay_bill_split_share'
 require_relative '../services/confirm_bill_split_payment'
 require_relative '../policies/account_policy'
@@ -758,7 +759,9 @@ module FinanceTracker
 
               payload = HttpRequest.new(routing).body_data
               SendBillSplit.call(bill:, owner: current_account, wallet_id: payload[:wallet_id] || payload['wallet_id'])
-              bill.reload.to_json
+              bill.reload
+              NotifyBillSplit.call(bill: bill, app_url: ENV.fetch('APP_URL', nil))
+              bill.to_json
             rescue SendBillSplit::InvalidInput => e
               routing.halt 400, { message: e.message }.to_json
             end
