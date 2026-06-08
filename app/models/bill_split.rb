@@ -40,8 +40,20 @@ module FinanceTracker
     def disputed? = status == 'disputed'
     def settled?  = status == 'settled'
 
-    # Editing (and deleting) is allowed only before settlement.
-    def editable? = draft? || disputed?
+    # Editing is allowed only before settlement AND before any money has moved
+    # (no non-owner participant has paid or settled). Once payments start, the
+    # amounts are locked.
+    def editable? = (draft? || disputed?) && !payments_started?
+
+    # Has any non-owner participant paid or settled their share?
+    def payments_started?
+      participants.any? { |p| p.account_id != creator_id && (p.paid? || p.settled?) }
+    end
+
+    # Participants who actually owe the owner (everyone but the owner).
+    def non_creator_participants
+      participants.reject { |p| p.account_id == creator_id }
+    end
 
     # Authorization helpers
     def creator?(account)
@@ -84,13 +96,38 @@ module FinanceTracker
       self
     end
 
-    def settle!
-      raise 'Bill split is already settled' if settled?
+    # This participant's computed total (money string), from the breakdown.
+    def total_for(participant)
+      row = breakdown.find { |r| r[:participant_id] == participant.id }
+      row ? row[:total] : '0.0'
+    end
+
+    # Reverse the owner's upfront expense (used when an edit revises amounts).
+    def clear_outlay!
+      FinanceTracker::Transaction.where(id: outlay_transaction_id).delete if outlay_transaction_id
+      self.creator_wallet_id = nil
+      self.outlay_transaction_id = nil
+      save_changes
+      self
+    end
+
+    # Deleting a bill also removes every wallet transaction it created, so the
+    # money it generated is reversed rather than orphaned.
+    def before_destroy
+      ids = participants.flat_map { |p| [p.expense_transaction_id, p.income_transaction_id] }
+      ids << outlay_transaction_id
+      FinanceTracker::Transaction.where(id: ids.compact).delete unless ids.compact.empty?
+      super
+    end
+
+    # Mark the whole bill settled once every owing participant has settled.
+    def settle_if_complete!
+      return self if settled?
+      return self unless non_creator_participants.all?(&:settled?)
 
       self.status = 'settled'
       self.settled_at = Time.now.utc
       save_changes
-      participants.each(&:settle!)
       self
     end
 
@@ -112,7 +149,10 @@ module FinanceTracker
           subtotal: money(subtotal),
           tax: money(tax_amount),
           service: money(service_amount),
-          total: money(subtotal + tax_amount + service_amount)
+          total: money(subtotal + tax_amount + service_amount),
+          is_owner: participant.account_id == creator_id,
+          paid_at: participant.paid_at,
+          has_proof: participant.proof?
         }
       end
     end
@@ -131,6 +171,7 @@ module FinanceTracker
         status:,
         creator_id:,
         creator_username: creator&.username,
+        creator_wallet_id:,
         grand_total:,
         sent_at:,
         settled_at:,

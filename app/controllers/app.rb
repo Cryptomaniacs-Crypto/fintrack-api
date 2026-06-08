@@ -30,6 +30,9 @@ require_relative '../services/assign_role_to_account'
 require_relative '../services/list_account_roles'
 require_relative '../services/create_bill_split'
 require_relative '../services/update_bill_split'
+require_relative '../services/send_bill_split'
+require_relative '../services/pay_bill_split_share'
+require_relative '../services/confirm_bill_split_payment'
 require_relative '../policies/account_policy'
 require_relative '../policies/account_scope'
 require_relative '../policies/category_policy'
@@ -747,14 +750,16 @@ module FinanceTracker
               end
             end
 
-            # POST api/v1/bill-splits/[id]/send — creator sends draft to participants
+            # POST api/v1/bill-splits/[id]/send — owner sends; optional wallet_id
+            # records the owner's upfront expense for the grand total.
             routing.post 'send' do
               scope_allows_write!(routing, 'transactions')
               routing.halt 403, { message: 'Only the creator can send a bill split' }.to_json unless bill.creator?(current_account)
 
-              bill.send!
+              payload = HttpRequest.new(routing).body_data
+              SendBillSplit.call(bill:, owner: current_account, wallet_id: payload[:wallet_id] || payload['wallet_id'])
               bill.reload.to_json
-            rescue StandardError => e
+            rescue SendBillSplit::InvalidInput => e
               routing.halt 400, { message: e.message }.to_json
             end
 
@@ -763,7 +768,7 @@ module FinanceTracker
               scope_allows_write!(routing, 'transactions')
               participant = bill.participant_for(current_account)
               routing.halt 403, { message: 'Only a participant can agree' }.to_json unless participant
-              routing.halt 409, { message: 'Bill split is already settled' }.to_json if bill.settled?
+              routing.halt 409, { message: 'Cannot change a paid or settled share' }.to_json if participant.paid? || participant.settled?
 
               participant.agree!
               bill.reload.to_json
@@ -776,7 +781,7 @@ module FinanceTracker
               scope_allows_write!(routing, 'transactions')
               participant = bill.participant_for(current_account)
               routing.halt 403, { message: 'Only a participant can reject' }.to_json unless participant
-              routing.halt 409, { message: 'Bill split is already settled' }.to_json if bill.settled?
+              routing.halt 409, { message: 'Cannot reject a paid or settled share' }.to_json if participant.paid? || participant.settled?
 
               payload = HttpRequest.new(routing).body_data
               reason = (payload[:reason] || payload['reason']).to_s.strip
@@ -789,15 +794,55 @@ module FinanceTracker
               routing.halt 400, { message: e.message }.to_json
             end
 
-            # POST api/v1/bill-splits/[id]/settle — creator locks the bill as settled
-            routing.post 'settle' do
+            # POST api/v1/bill-splits/[id]/pay — a participant records payment from
+            # one of their wallets, optionally attaching a proof image.
+            routing.post 'pay' do
               scope_allows_write!(routing, 'transactions')
-              routing.halt 403, { message: 'Only the creator can settle a bill split' }.to_json unless bill.creator?(current_account)
-
-              bill.settle!
+              payload = HttpRequest.new(routing).body_data
+              PayBillSplitShare.call(
+                bill:,
+                payer: current_account,
+                wallet_id: payload[:wallet_id] || payload['wallet_id'],
+                proof_base64: payload[:proof_base64] || payload['proof_base64'],
+                proof_content_type: payload[:proof_content_type] || payload['proof_content_type']
+              )
               bill.reload.to_json
-            rescue StandardError => e
+            rescue PayBillSplitShare::NotAllowed => e
+              routing.halt 403, { message: e.message }.to_json
+            rescue PayBillSplitShare::InvalidInput => e
               routing.halt 400, { message: e.message }.to_json
+            end
+
+            routing.on 'participants' do
+              routing.on String do |participant_id|
+                participant = bill.participants.find { |p| p.id == participant_id }
+                routing.halt 404, { message: 'Participant not found' }.to_json unless participant
+
+                # POST .../participants/[pid]/confirm — owner confirms receipt (income)
+                routing.post 'confirm' do
+                  scope_allows_write!(routing, 'transactions')
+                  payload = HttpRequest.new(routing).body_data
+                  ConfirmBillSplitPayment.call(
+                    bill:, owner: current_account, participant:,
+                    wallet_id: payload[:wallet_id] || payload['wallet_id']
+                  )
+                  bill.reload.to_json
+                rescue ConfirmBillSplitPayment::NotAllowed => e
+                  routing.halt 403, { message: e.message }.to_json
+                rescue ConfirmBillSplitPayment::InvalidInput => e
+                  routing.halt 400, { message: e.message }.to_json
+                end
+
+                # GET .../participants/[pid]/proof — owner or that participant only
+                routing.get 'proof' do
+                  unless bill.creator?(current_account) || participant.account_id == current_account.id
+                    routing.halt 403, { message: 'Not authorized to view this proof' }.to_json
+                  end
+                  routing.halt 404, { message: 'No proof uploaded' }.to_json unless participant.proof?
+
+                  { content_type: participant.proof_content_type, image_base64: participant.proof_image }.to_json
+                end
+              end
             end
           end
         end

@@ -14,11 +14,24 @@ module FinanceTracker
       raise NotEditable, 'This bill can no longer be edited' unless bill_split.editable?
 
       FinanceTracker::Api.DB.transaction do
+        # Editing a previously-sent (now disputed) bill revises amounts, so undo
+        # the owner's upfront expense and drop it back to draft for a fresh send.
+        bill_split.clear_outlay! if bill_split.outlay_transaction_id
         apply_attributes(bill_split, title, tax_percent, service_percent, note)
         replace_items(bill_split, items) unless items.nil?
         bill_split.reset_participants!
+        revert_to_draft(bill_split)
         bill_split.reload
       end
+    end
+
+    # A revised bill must be re-sent, so it returns to draft and clears sent_at.
+    def self.revert_to_draft(bill)
+      return if bill.status == 'draft'
+
+      bill.status = 'draft'
+      bill.sent_at = nil
+      bill.save_changes
     end
 
     def self.apply_attributes(bill, title, tax_percent, service_percent, note)

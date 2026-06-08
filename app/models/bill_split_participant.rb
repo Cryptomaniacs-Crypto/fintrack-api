@@ -30,10 +30,22 @@ module FinanceTracker
       self.reject_note_secure = stripped.empty? ? nil : SecureDB.encrypt(stripped)
     end
 
+    # Payment-proof image, stored as encrypted base64 at rest.
+    def proof_image
+      SecureDB.decrypt(proof_image_secure)
+    end
+
+    def proof_image=(base64)
+      self.proof_image_secure = base64.to_s.empty? ? nil : SecureDB.encrypt(base64)
+    end
+
+    def proof? = !proof_image_secure.nil?
+
     # Status predicates
     def pending?  = status == 'pending'
     def agreed?   = status == 'agreed'
     def rejected? = status == 'rejected'
+    def paid?     = status == 'paid'
     def settled?  = status == 'settled'
 
     # State columns are whitelist-restricted from mass assignment, so these

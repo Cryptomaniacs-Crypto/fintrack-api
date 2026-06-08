@@ -146,14 +146,6 @@ describe 'Bill Splits API' do
       _(attrs['participants'].map { |p| p['status'] }.uniq).must_equal ['pending']
     end
 
-    it 'settles the bill as creator and then locks edits' do
-      send_bill
-      post "api/v1/bill-splits/#{@id}/settle", '', @json.merge(auth_header_for(@alice))
-      _(attrs['status']).must_equal 'settled'
-
-      patch "api/v1/bill-splits/#{@id}", { tax_percent: '5' }.to_json, @json.merge(auth_header_for(@alice))
-      _(last_response.status).must_equal 409
-    end
   end
 
   describe 'authorization and listing' do
@@ -175,6 +167,129 @@ describe 'Bill Splits API' do
       get 'api/v1/bill-splits', {}, auth_header_for(@bob)
       _(last_response.status).must_equal 200
       _(JSON.parse(last_response.body)['data'].size).must_equal 1
+    end
+  end
+
+  describe 'wallet-backed settlement' do
+    # A valid 1x1 PNG (correct magic bytes) for proof-image tests.
+    PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+
+    def wallet_for(account, name)
+      FinanceTracker::Wallet.create(account_id: account.id, name:, balance: '0', method_type: 'cash')
+    end
+
+    def participant_id(username)
+      attrs['participants'].find { |p| p['username'] == username }['participant_id']
+    end
+
+    before do
+      @wa  = wallet_for(@alice, 'Alice Cash')
+      @wa2 = wallet_for(@alice, 'Alice Bank')
+      @wb  = wallet_for(@bob, 'Bob Cash')
+      @id = create_draft['id'] # alice + bob + carol
+      patch "api/v1/bill-splits/#{@id}",
+            { items: [{ name: 'Meal', amount: '30', sharer_usernames: %w[alice bob carol] }] }.to_json,
+            @json.merge(auth_header_for(@alice))
+    end
+
+    def send_with_wallet(wallet = @wa)
+      post "api/v1/bill-splits/#{@id}/send", { wallet_id: wallet.id }.to_json, @json.merge(auth_header_for(@alice))
+    end
+
+    it 'records the owner upfront expense and auto-settles the owner row on send' do
+      send_with_wallet
+      _(last_response.status).must_equal 200
+      _(attrs['status']).must_equal 'pending'
+      _(attrs['creator_wallet_id']).must_equal @wa.id
+      owner_row = attrs['participants'].find { |p| p['username'] == 'alice' }
+      _(owner_row['status']).must_equal 'settled'
+      # an expense transaction for the grand total ($30) exists on the owner's wallet
+      _(FinanceTracker::Transaction.where(wallet_id: @wa.id).map(&:amount)).must_include '-30.0'
+    end
+
+    it 'lets a participant pay from their own wallet (expense recorded)' do
+      send_with_wallet
+      post "api/v1/bill-splits/#{@id}/agree", '', @json.merge(auth_header_for(@bob))
+      post "api/v1/bill-splits/#{@id}/pay", { wallet_id: @wb.id }.to_json, @json.merge(auth_header_for(@bob))
+      _(last_response.status).must_equal 200
+      bob = attrs['participants'].find { |p| p['username'] == 'bob' }
+      _(bob['status']).must_equal 'paid'
+      _(FinanceTracker::Transaction.where(wallet_id: @wb.id).map(&:amount)).must_include '-10.0'
+    end
+
+    it 'rejects paying from a wallet you do not own' do
+      send_with_wallet
+      post "api/v1/bill-splits/#{@id}/agree", '', @json.merge(auth_header_for(@bob))
+      post "api/v1/bill-splits/#{@id}/pay", { wallet_id: @wa.id }.to_json, @json.merge(auth_header_for(@bob))
+      _(last_response.status).must_equal 400
+    end
+
+    it 'requires agreement before paying' do
+      send_with_wallet
+      post "api/v1/bill-splits/#{@id}/pay", { wallet_id: @wb.id }.to_json, @json.merge(auth_header_for(@bob))
+      _(last_response.status).must_equal 400
+    end
+
+    it 'lets the owner confirm a payment (income recorded) and settles the share' do
+      send_with_wallet
+      post "api/v1/bill-splits/#{@id}/agree", '', @json.merge(auth_header_for(@bob))
+      post "api/v1/bill-splits/#{@id}/pay", { wallet_id: @wb.id }.to_json, @json.merge(auth_header_for(@bob))
+      pid = participant_id('bob')
+      post "api/v1/bill-splits/#{@id}/participants/#{pid}/confirm", { wallet_id: @wa2.id }.to_json, @json.merge(auth_header_for(@alice))
+      _(last_response.status).must_equal 200
+      bob = attrs['participants'].find { |p| p['username'] == 'bob' }
+      _(bob['status']).must_equal 'settled'
+      _(FinanceTracker::Transaction.where(wallet_id: @wa2.id).map(&:amount)).must_include '10.0'
+    end
+
+    it 'auto-settles the whole bill once every participant is settled' do
+      @wc = wallet_for(@carol, 'Carol Cash')
+      send_with_wallet
+      %i[bob carol].each do |who|
+        acct = instance_variable_get("@#{who}")
+        wallet = who == :bob ? @wb : @wc
+        post "api/v1/bill-splits/#{@id}/agree", '', @json.merge(auth_header_for(acct))
+        post "api/v1/bill-splits/#{@id}/pay", { wallet_id: wallet.id }.to_json, @json.merge(auth_header_for(acct))
+        pid = participant_id(who.to_s)
+        post "api/v1/bill-splits/#{@id}/participants/#{pid}/confirm", { wallet_id: @wa.id }.to_json, @json.merge(auth_header_for(@alice))
+      end
+      _(attrs['status']).must_equal 'settled'
+    end
+
+    it 'locks editing once a payment has been made' do
+      send_with_wallet
+      post "api/v1/bill-splits/#{@id}/agree", '', @json.merge(auth_header_for(@bob))
+      post "api/v1/bill-splits/#{@id}/pay", { wallet_id: @wb.id }.to_json, @json.merge(auth_header_for(@bob))
+      patch "api/v1/bill-splits/#{@id}", { tax_percent: '5' }.to_json, @json.merge(auth_header_for(@alice))
+      _(last_response.status).must_equal 409
+    end
+
+    it 'stores and serves a valid proof image to the owner, hides it from outsiders' do
+      send_with_wallet
+      post "api/v1/bill-splits/#{@id}/agree", '', @json.merge(auth_header_for(@bob))
+      post "api/v1/bill-splits/#{@id}/pay",
+           { wallet_id: @wb.id, proof_base64: PNG_1PX, proof_content_type: 'image/png' }.to_json,
+           @json.merge(auth_header_for(@bob))
+      _(last_response.status).must_equal 200
+      _(attrs['participants'].find { |p| p['username'] == 'bob' }['has_proof']).must_equal true
+
+      pid = participant_id('bob')
+      get "api/v1/bill-splits/#{@id}/participants/#{pid}/proof", {}, auth_header_for(@alice)
+      _(last_response.status).must_equal 200
+      _(JSON.parse(last_response.body)['image_base64']).must_equal PNG_1PX
+
+      # a non-participant cannot view it
+      get "api/v1/bill-splits/#{@id}/participants/#{pid}/proof", {}, auth_header_for(@carol)
+      _(last_response.status).must_equal 403
+    end
+
+    it 'rejects a proof whose bytes do not match the declared type' do
+      send_with_wallet
+      post "api/v1/bill-splits/#{@id}/agree", '', @json.merge(auth_header_for(@bob))
+      post "api/v1/bill-splits/#{@id}/pay",
+           { wallet_id: @wb.id, proof_base64: Base64.strict_encode64('not really a png'), proof_content_type: 'image/png' }.to_json,
+           @json.merge(auth_header_for(@bob))
+      _(last_response.status).must_equal 400
     end
   end
 end
