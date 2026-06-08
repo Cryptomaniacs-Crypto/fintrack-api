@@ -52,27 +52,28 @@ module FinanceTracker
 
     def send_email
       response = HTTP
-                 .basic_auth(user: 'api', pass: api_key)
-                 .post(mail_url, form: mail_params)
+                 .auth("Bearer #{api_key}")
+                 .post(mail_url, json: mail_json)
       return if response.status < 300
 
-      Api.logger.error("Mailgun error #{response.status}: #{response.body}")
+      Api.logger.error("SendGrid error #{response.status}: #{response.body}")
       raise EmailProviderError, 'Email provider rejected the request'
     end
 
-    def api_key    = ENV.fetch('MAILGUN_API_KEY')
-    def domain     = ENV.fetch('MAILGUN_DOMAIN')
-    def mail_url   = "https://api.mailgun.net/v3/#{domain}/messages"
-    def from_email = ENV.fetch('MAILGUN_FROM_EMAIL')
-    def from_name  = ENV.fetch('MAILGUN_FROM_NAME', 'Fintrack')
+    def api_key    = ENV.fetch('SENDGRID_API_KEY')
+    def mail_url   = 'https://api.sendgrid.com/v3/mail/send'
+    def from_email = ENV.fetch('SENDGRID_FROM_EMAIL')
+    def from_name  = ENV.fetch('SENDGRID_FROM_NAME', 'Fintrack')
 
-    def mail_params
+    def mail_json
       {
-        from:    "#{from_name} <#{from_email}>",
-        to:      email,
+        personalizations: [{ to: [{ email: email }] }],
+        from:    { email: from_email, name: from_name },
         subject: 'Fintrack Registration Verification',
-        text:    text_body,
-        html:    html_body
+        content: [
+          { type: 'text/plain', value: text_body },
+          { type: 'text/html',  value: html_body }
+        ]
       }
     end
 
