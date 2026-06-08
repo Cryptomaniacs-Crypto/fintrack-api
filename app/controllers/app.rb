@@ -21,6 +21,7 @@ require_relative '../models/bill_split_item'
 require_relative '../services/get_account_by_username'
 require_relative '../services/find_account_by_email'
 require_relative '../services/create_account'
+require_relative '../services/update_account_username'
 require_relative '../services/authenticate_account'
 require_relative '../services/authenticate_sso'
 require_relative '../services/authorize_account'
@@ -211,6 +212,27 @@ module FinanceTracker
                 routing.halt 404, { message: e.message }.to_json
               rescue AuthorizeAccount::ForbiddenError
                 routing.halt 404, { message: 'Account not found' }.to_json
+              end
+
+              # PUT api/v1/accounts/[username] -- owner renames their handle.
+              routing.put do
+                current_account = current_account_from_auth
+                routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+
+                target = Account.first(username:)
+                routing.halt 404, { message: 'Account not found' }.to_json unless target
+                routing.halt 403, { message: 'Not allowed' }.to_json unless
+                  ::FinanceTracker::AccountPolicy.new(current_account, target, auth_scope: auth_scope).can_edit?
+
+                new_username = HttpRequest.new(routing).body_data[:username]
+                UpdateAccountUsername.call(account: target, new_username:).to_json
+              rescue UpdateAccountUsername::InvalidUsernameError => e
+                routing.halt 400, { message: e.message }.to_json
+              rescue UpdateAccountUsername::UsernameTakenError => e
+                routing.halt 409, { message: e.message }.to_json
+              rescue StandardError => e
+                Api.logger.error "USERNAME UPDATE ERROR: #{e.message}"
+                routing.halt 500, { message: 'Unknown server error' }.to_json
               end
             end
 
