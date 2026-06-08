@@ -71,7 +71,8 @@ module FinanceTracker
         from:    "#{from_name} <#{from_email}>",
         to:      email,
         subject: 'Fintrack Registration Verification',
-        text:    text_body
+        text:    text_body,
+        html:    html_body
       }
     end
 
@@ -87,6 +88,16 @@ module FinanceTracker
 
         — Fintrack
       TEXT
+    end
+
+    def html_body
+      <<~HTML
+        <p>Hi #{username},</p>
+        <p>Click the link below to finish creating your Fintrack account:</p>
+        <p><a href="#{verification_url}">Verify my account</a></p>
+        <p>If you didn't request this, you can safely ignore this email.</p>
+        <p>— Fintrack</p>
+      HTML
     end
   end
 end
