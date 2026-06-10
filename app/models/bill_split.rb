@@ -159,7 +159,12 @@ module FinanceTracker
     end
 
     def grand_total
-      money(breakdown.sum(BigDecimal('0')) { |row| BigDecimal(row[:total]) })
+      # Compute from raw item amounts so rounding in per-person shares never
+      # causes the total to drift (e.g. $10 split 3 ways rounds to $3.33×3=$9.99).
+      raw = items.sum(BigDecimal('0')) { |item| BigDecimal(item.amount.to_s) }
+      tax     = to_decimal(tax_percent)
+      service = to_decimal(service_percent)
+      money(raw + raw * tax / 100 + raw * service / 100)
     end
 
     def to_h
