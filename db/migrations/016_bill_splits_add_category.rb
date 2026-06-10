@@ -2,24 +2,13 @@
 
 Sequel.migration do
   up do
-    # Column may already exist if a previous broken migration attempt ran the
-    # ADD COLUMN SQL before failing at the Ruby level.
-    run 'ALTER TABLE bill_splits ADD COLUMN IF NOT EXISTS category_id uuid'
-    run <<~SQL
-      DO $$
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.table_constraints
-          WHERE constraint_name = 'bill_splits_category_id_fkey'
-            AND table_name = 'bill_splits'
-        ) THEN
-          ALTER TABLE bill_splits
-            ADD CONSTRAINT bill_splits_category_id_fkey
-            FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL;
-        END IF;
-      END
-      $$;
-    SQL
+    # A previous failed attempt may have added category_id as uuid (wrong type).
+    # Drop it if present so we can add it with the correct integer type.
+    run 'ALTER TABLE bill_splits DROP COLUMN IF EXISTS category_id'
+    alter_table(:bill_splits) do
+      add_column :category_id, Integer, null: true
+      add_foreign_key :category_id, :categories, null: true, on_delete: :set_null
+    end
   end
 
   down do
