@@ -62,7 +62,7 @@ module FinanceTracker
     def mail_json(participant, account, to_email)
       owner     = @bill.creator&.username
       amount    = @bill.total_for(participant)
-      bill_link = @app_url.empty? ? nil : "#{@app_url}/bill-splits/#{@bill.id}"
+      bill_link = @app_url.empty? ? nil : "#{@app_url}/bill-splits/#{@bill.id}?for=#{account.username}"
 
       {
         personalizations: [{ to: [{ email: to_email }] }],

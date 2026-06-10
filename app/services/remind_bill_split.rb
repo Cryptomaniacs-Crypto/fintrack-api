@@ -48,7 +48,7 @@ module FinanceTracker
       row           = bill.breakdown.find { |r| r[:account_id] == participant.account_id }
       amount        = row ? row[:total] : '?'
       owner_wallets = Wallet.where(account_id: bill.creator_id).all
-      bill_link     = ENV.fetch('APP_URL', '').chomp('/').then { |u| u.empty? ? nil : "#{u}/bill-splits/#{bill.id}" }
+      bill_link     = ENV.fetch('APP_URL', '').chomp('/').then { |u| u.empty? ? nil : "#{u}/bill-splits/#{bill.id}?for=#{account.username}" }
 
       response = HTTP
                    .auth("Bearer #{api_key}")
