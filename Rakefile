@@ -115,7 +115,7 @@ namespace :db do
     puts "Deleted #{db_filename}"
   end
 
-  desc 'Bootstrap an admin: ensure roles, create-or-find USERNAME, grant admin+creator'
+  desc 'Bootstrap an admin: ensure roles, create-or-find USERNAME, grant admin+member'
   task bootstrap_admin: :load_models do
     require 'io/console'
 
@@ -124,7 +124,7 @@ namespace :db do
     abort 'USERNAME=<username> required' if username.empty?
 
     # 1. Ensure the static roles reference table is populated.
-    role_names = %w[admin creator member]
+    role_names = %w[admin member]
     role_names.each { |name| FinanceTracker::Role.find_or_create(name:) }
     puts "Roles ensured: #{role_names.join(', ')}"
 
@@ -150,8 +150,8 @@ namespace :db do
       puts "- Account #{username} already exists (id=#{account.id})"
     end
 
-    # 3. Grant admin + creator (idempotent).
-    %w[admin creator].each do |role_name|
+    # 3. Grant admin + member (idempotent).
+    %w[admin member].each do |role_name|
       if account.system_roles_dataset.where(name: role_name).any?
         puts "  - already has '#{role_name}'"
       else

@@ -4,7 +4,7 @@ require 'json'
 require 'sequel'
 
 module FinanceTracker
-  # Models a named system role (admin, creator, member, etc.).
+  # Models a named system role (admin or member).
   class Role < Sequel::Model
     class UnknownRoleError < StandardError; end
 
@@ -18,13 +18,11 @@ module FinanceTracker
     end
 
     # System-role predicates
-    def admin?   = name == 'admin'
-    def creator? = name == 'creator'
-    def member?  = name == 'member'
+    def admin?  = name == 'admin'
+    def member? = name == 'member'
 
-    # Grouping predicates
-    def system?         = %w[admin creator member].include?(name)
-    def can_create?     = %w[admin creator].include?(name)
+    # Grouping predicate
+    def system? = %w[admin member].include?(name)
 
     def to_json(options = {})
       JSON({ id:, name: }, options)

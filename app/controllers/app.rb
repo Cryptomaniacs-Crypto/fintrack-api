@@ -279,7 +279,7 @@ module FinanceTracker
 
                 # DELETE api/v1/accounts/[username]/roles/[role_name]
                 routing.delete do
-                  routing.halt 400, { message: 'Unknown role' }.to_json unless %w[admin creator member].include?(role_name)
+                  routing.halt 400, { message: 'Unknown role' }.to_json unless %w[admin member].include?(role_name)
                   role = Role.first(name: role_name)
                   routing.halt 404, { message: 'Role not assigned' }.to_json unless role && target.system_roles.include?(role)
 
