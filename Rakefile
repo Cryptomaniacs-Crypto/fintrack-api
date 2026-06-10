@@ -164,3 +164,13 @@ end
 
 desc 'Delete all data and reseed'
 task reseed: %i[db:reset_seeds db:seed]
+
+namespace :bill_splits do
+  desc 'Email payment reminders to participants who have not paid in 3+ days'
+  task remind: :print_env do
+    require_app(%w[config models services])
+    puts 'Sending bill split reminders...'
+    FinanceTracker::RemindBillSplit.call
+    puts 'Done.'
+  end
+end
