@@ -296,17 +296,47 @@ module FinanceTracker
           @wallet_route = "#{@api_root}/wallets"
           routing.halt 401, { message: 'Authentication required' }.to_json unless current_account_from_auth
 
-          # GET api/v1/wallets/[wallet_id]
-          routing.get String do |wallet_id|
-            wallet = Wallet.first(id: wallet_id)
-            current_account = current_account_from_auth
-            routing.halt(404, { message: 'Wallet not found' }.to_json) unless ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).can_view?
+          routing.on String do |wallet_id|
+            # GET api/v1/wallets/[wallet_id]
+            routing.get do
+              wallet = Wallet.first(id: wallet_id)
+              current_account = current_account_from_auth
+              routing.halt(404, { message: 'Wallet not found' }.to_json) unless ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).can_view?
 
-            envelope = JSON.parse(wallet.to_json)
-            envelope['policies'] = ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).summary
-            envelope.to_json
-          rescue StandardError => e
-            routing.halt 404, { message: e.message }.to_json
+              envelope = JSON.parse(wallet.to_json)
+              envelope['policies'] = ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).summary
+              envelope.to_json
+            rescue StandardError => e
+              routing.halt 404, { message: e.message }.to_json
+            end
+
+            # PATCH api/v1/wallets/[wallet_id]
+            routing.patch do
+              data = HttpRequest.new(routing).body_data
+              current_account = current_account_from_auth
+              scope_allows_write!(routing, 'wallets')
+
+              wallet = Wallet.first(id: wallet_id)
+              routing.halt 404, { message: 'Wallet not found' }.to_json unless wallet
+
+              policy = ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope)
+              routing.halt 403, { message: 'Not authorized' }.to_json unless policy.can_edit?
+
+              name_val = data['name'] || data[:name]
+              wallet.update(name: name_val.to_s.strip) if name_val.to_s.strip.length.positive?
+
+              an = data.key?('account_number') ? data['account_number'] : data[:account_number]
+              unless an.nil?
+                wallet.account_number = an.to_s
+                wallet.save_changes
+              end
+
+              envelope = JSON.parse(wallet.to_json)
+              { message: 'Wallet updated', data: envelope }.to_json
+            rescue StandardError => e
+              Api.logger.error "PATCH WALLET ERROR: #{e.message}"
+              routing.halt 500, { message: e.message }.to_json
+            end
           end
 
           # GET api/v1/wallets
@@ -350,18 +380,57 @@ module FinanceTracker
           @category_route = "#{@api_root}/categories"
           routing.halt 401, { message: 'Authentication required' }.to_json unless current_account_from_auth
 
-          # GET api/v1/categories/[category_id]
-          routing.get String do |category_id|
-            category = Category.first(id: category_id)
-            current_account = current_account_from_auth
-            routing.halt(404, { message: 'Category not found' }.to_json) unless category
-            routing.halt(404, { message: 'Category not found' }.to_json) unless ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).can_view?
+          routing.on String do |category_id|
+            # GET api/v1/categories/[category_id]
+            routing.get do
+              category = Category.first(id: category_id)
+              current_account = current_account_from_auth
+              routing.halt(404, { message: 'Category not found' }.to_json) unless category
+              routing.halt(404, { message: 'Category not found' }.to_json) unless ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).can_view?
 
-            envelope = JSON.parse(category.to_json)
-            envelope['policies'] = ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).summary
-            envelope.to_json
-          rescue StandardError => e
-            routing.halt 404, { message: e.message }.to_json
+              envelope = JSON.parse(category.to_json)
+              envelope['policies'] = ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).summary
+              envelope.to_json
+            rescue StandardError => e
+              routing.halt 404, { message: e.message }.to_json
+            end
+
+            # PATCH api/v1/categories/[category_id]
+            routing.patch do
+              data = HttpRequest.new(routing).body_data
+              current_account = current_account_from_auth
+              scope_allows_write!(routing, 'categories')
+
+              category = Category.first(id: category_id)
+              routing.halt 404, { message: 'Category not found' }.to_json unless category
+              routing.halt 403, { message: 'Not authorized' }.to_json unless ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).can_edit?
+
+              safe = data.slice('name', 'description').transform_keys(&:to_sym)
+              category.update(safe) unless safe.empty?
+
+              envelope = JSON.parse(category.to_json)
+              { message: 'Category updated', data: envelope }.to_json
+            rescue StandardError => e
+              Api.logger.error "PATCH CATEGORY ERROR: #{e.message}"
+              routing.halt 500, { message: e.message }.to_json
+            end
+
+            # DELETE api/v1/categories/[category_id]
+            routing.delete do
+              current_account = current_account_from_auth
+              scope_allows_write!(routing, 'categories')
+
+              category = Category.first(id: category_id)
+              routing.halt 404, { message: 'Category not found' }.to_json unless category
+              routing.halt 403, { message: 'Not authorized' }.to_json unless ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).can_delete?
+
+              category.destroy
+              response.status = 204
+              nil
+            rescue StandardError => e
+              Api.logger.error "DELETE CATEGORY ERROR: #{e.message}"
+              routing.halt 500, { message: e.message }.to_json
+            end
           end
 
           # GET api/v1/categories
