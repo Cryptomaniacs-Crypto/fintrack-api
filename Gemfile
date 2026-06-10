@@ -8,7 +8,7 @@ ruby File.read('.ruby-version').strip if File.exist?('.ruby-version')
 gem 'base64'
 gem 'json'
 gem 'logger', '~> 1.0'
-gem 'puma', '~>7.0'
+gem 'puma', '~>7.2'
 gem 'roda', '~>3.0'
 gem 'http', '~>5.1'
 
