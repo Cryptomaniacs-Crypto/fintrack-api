@@ -10,14 +10,14 @@ module FinanceTracker
     class InvalidInput < StandardError; end
     class NotEditable < StandardError; end
 
-    def self.call(bill_split:, title: nil, tax_percent: nil, service_percent: nil, note: nil, items: nil)
+    def self.call(bill_split:, title: nil, tax_percent: nil, service_percent: nil, note: nil, items: nil, category_id: nil)
       raise NotEditable, 'This bill can no longer be edited' unless bill_split.editable?
 
       FinanceTracker::Api.DB.transaction do
         # Editing a previously-sent (now disputed) bill revises amounts, so undo
         # the owner's upfront expense and drop it back to draft for a fresh send.
         bill_split.clear_outlay! if bill_split.outlay_transaction_id
-        apply_attributes(bill_split, title, tax_percent, service_percent, note)
+        apply_attributes(bill_split, title, tax_percent, service_percent, note, category_id)
         replace_items(bill_split, items) unless items.nil?
         bill_split.reset_participants!
         revert_to_draft(bill_split)
@@ -34,12 +34,13 @@ module FinanceTracker
       bill.save_changes
     end
 
-    def self.apply_attributes(bill, title, tax_percent, service_percent, note)
+    def self.apply_attributes(bill, title, tax_percent, service_percent, note, category_id)
       cleaned_title = title.to_s.strip
       bill.title = cleaned_title unless cleaned_title.empty?
       bill.tax_percent = normalize_percent(tax_percent) unless tax_percent.nil?
       bill.service_percent = normalize_percent(service_percent) unless service_percent.nil?
       bill.note = note unless note.nil?
+      bill.category_id = category_id.to_s.empty? ? nil : category_id unless category_id.nil?
       bill.save_changes
     end
 

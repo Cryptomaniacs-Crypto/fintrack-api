@@ -21,7 +21,8 @@ module FinanceTracker
           title: "Bill split: #{bill.title} (#{participant.account&.username}'s share)",
           amount: bill.total_for(participant),
           transaction_date: Date.today,
-          wallet_id: wallet.id
+          wallet_id: wallet.id,
+          category_id: bill.category_id
         )
         participant.status = 'settled'
         participant.received_wallet_id = wallet.id

@@ -807,7 +807,8 @@ module FinanceTracker
                   tax_percent: payload[:tax_percent] || payload['tax_percent'],
                   service_percent: payload[:service_percent] || payload['service_percent'],
                   note: payload[:note] || payload['note'],
-                  items: payload[:items] || payload['items']
+                  items: payload[:items] || payload['items'],
+                  category_id: payload[:category_id] || payload['category_id']
                 )
                 updated.to_json
               rescue UpdateBillSplit::NotEditable => e

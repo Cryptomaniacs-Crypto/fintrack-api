@@ -63,7 +63,6 @@ module FinanceTracker
 
     def text_body(account, owner, amount, bill_link)
       link_line = bill_link ? "\nView and respond here:\n#{bill_link}\n" : ''
-      payment_info  = payment_lines.empty? ? '  Contact the bill owner directly.' : payment_lines.join("\n")
       <<~TEXT
         Hi #{account.username},
 
@@ -71,10 +70,8 @@ module FinanceTracker
 
         Bill:       #{@bill.title}
         Amount due: $#{amount}
-        Payment options:
-        #{payment_info}
 
-        Or arrange another payment method with #{bill.creator&.username} directly.
+        Please arrange payment directly with #{owner}.
 
         Tap the link below to view the details and take action.
         #{link_line}

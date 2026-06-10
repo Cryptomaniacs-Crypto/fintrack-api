@@ -16,13 +16,14 @@ module FinanceTracker
   # disputed) and reset every participant back to pending.
   class BillSplit < Sequel::Model
     many_to_one :creator, class: :'FinanceTracker::Account', key: :creator_id
+    many_to_one :category, class: :'FinanceTracker::Category', key: :category_id
     one_to_many :participants, class: :'FinanceTracker::BillSplitParticipant', key: :bill_split_id
     one_to_many :items, class: :'FinanceTracker::BillSplitItem', key: :bill_split_id
 
     plugin :uuid, field: :id
     plugin :timestamps, update_on_create: true
     plugin :whitelist_security
-    set_allowed_columns :creator_id, :title, :tax_percent, :service_percent
+    set_allowed_columns :creator_id, :title, :tax_percent, :service_percent, :category_id
 
     # note is an optional sensitive free-text field, encrypted at rest.
     def note
@@ -168,6 +169,8 @@ module FinanceTracker
         note:,
         tax_percent:,
         service_percent:,
+        category_id:,
+        category_name: category&.name,
         status:,
         creator_id:,
         creator_username: creator&.username,

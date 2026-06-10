@@ -27,7 +27,8 @@ module FinanceTracker
         title: "Bill split: #{bill.title} (you fronted)",
         amount: "-#{bill.grand_total}",
         transaction_date: Date.today,
-        wallet_id: wallet.id
+        wallet_id: wallet.id,
+        category_id: bill.category_id
       )
       bill.creator_wallet_id = wallet.id
       bill.outlay_transaction_id = tx.id
