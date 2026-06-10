@@ -1,8 +1,17 @@
 # frozen_string_literal: true
 
 Sequel.migration do
-  change do
-    add_column :bill_splits, :category_id, :uuid
-    add_foreign_key [:category_id], :categories, on_delete: :set_null
+  up do
+    alter_table(:bill_splits) do
+      add_column :category_id, :uuid, null: true
+      add_foreign_key :category_id, :categories, type: :uuid, null: true, on_delete: :set_null
+    end
+  end
+
+  down do
+    alter_table(:bill_splits) do
+      drop_foreign_key :category_id
+      drop_column :category_id
+    end
   end
 end
