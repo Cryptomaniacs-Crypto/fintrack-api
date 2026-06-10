@@ -2,19 +2,18 @@
 
 Sequel.migration do
   up do
-    # A previous failed attempt may have added category_id as uuid (wrong type).
-    # Drop it if present so we can add it with the correct integer type.
-    run 'ALTER TABLE bill_splits DROP COLUMN IF EXISTS category_id'
-    alter_table(:bill_splits) do
-      add_column :category_id, Integer, null: true
-      add_foreign_key :category_id, :categories, null: true, on_delete: :set_null
-    end
+    # Previous failed attempts may have left a category_id column with the wrong
+    # type (uuid instead of integer). Drop and recreate cleanly via raw SQL.
+    run 'ALTER TABLE bill_splits DROP COLUMN IF EXISTS category_id CASCADE'
+    run 'ALTER TABLE bill_splits ADD COLUMN category_id integer'
+    run <<~SQL
+      ALTER TABLE bill_splits
+        ADD CONSTRAINT bill_splits_category_id_fkey
+        FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
+    SQL
   end
 
   down do
-    alter_table(:bill_splits) do
-      drop_foreign_key :category_id
-      drop_column :category_id
-    end
+    run 'ALTER TABLE bill_splits DROP COLUMN IF EXISTS category_id CASCADE'
   end
 end
