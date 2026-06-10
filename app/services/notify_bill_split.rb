@@ -9,7 +9,8 @@ module FinanceTracker
   class NotifyBillSplit
     def self.call(bill:, app_url: nil)
       new(bill:, app_url:).call
-    rescue StandardError
+    rescue StandardError => e
+      Api.logger.error("[NotifyBillSplit] Unhandled error: #{e.class}: #{e.message}")
       nil
     end
 
@@ -19,11 +20,15 @@ module FinanceTracker
     end
 
     def call
-      return if api_key.to_s.strip.empty?
+      if api_key.to_s.strip.empty?
+        Api.logger.warn('[NotifyBillSplit] No SENDGRID_API_KEY — skipping')
+        return
+      end
 
       @bill.non_creator_participants.each do |participant|
         send_notification(participant)
-      rescue StandardError
+      rescue StandardError => e
+        Api.logger.error("[NotifyBillSplit] Error notifying participant: #{e.class}: #{e.message}")
         next
       end
     end
@@ -32,17 +37,26 @@ module FinanceTracker
 
     def send_notification(participant)
       account = participant.account
-      return unless account
+      unless account
+        Api.logger.warn("[NotifyBillSplit] Participant #{participant.id} has no account — skipping")
+        return
+      end
 
       to_email = account.email
-      return if to_email.to_s.strip.empty?
+      if to_email.to_s.strip.empty?
+        Api.logger.warn("[NotifyBillSplit] Account #{account.id} has no email — skipping")
+        return
+      end
 
+      Api.logger.info("[NotifyBillSplit] Sending to #{to_email} for bill #{@bill.id}")
       response = HTTP
                  .auth("Bearer #{api_key}")
                  .post(mail_url, json: mail_json(participant, account, to_email))
-      return if response.status < 300
-
-      Api.logger.error("SendGrid error #{response.status}: #{response.body}")
+      if response.status < 300
+        Api.logger.info("[NotifyBillSplit] Sent OK (#{response.status})")
+      else
+        Api.logger.error("[NotifyBillSplit] SendGrid #{response.status}: #{response.body}")
+      end
     end
 
     def mail_json(participant, account, to_email)
