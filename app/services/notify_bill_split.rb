@@ -63,6 +63,7 @@ module FinanceTracker
 
     def text_body(account, owner, amount, bill_link)
       link_line = bill_link ? "\nView and respond here:\n#{bill_link}\n" : ''
+      payment_info  = payment_lines.empty? ? '  Contact the bill owner directly.' : payment_lines.join("\n")
       <<~TEXT
         Hi #{account.username},
 
@@ -70,6 +71,10 @@ module FinanceTracker
 
         Bill:       #{@bill.title}
         Amount due: $#{amount}
+        Payment options:
+        #{payment_info}
+
+        Or arrange another payment method with #{bill.creator&.username} directly.
 
         Tap the link below to view the details and take action.
         #{link_line}
@@ -81,7 +86,7 @@ module FinanceTracker
       button = if bill_link
         <<~BTN
           <div style="text-align:center;margin:28px 0;">
-            <a href="#{bill_link}" style="display:inline-block;background-color:#2FA4E7;color:#ffffff;text-decoration:none;padding:13px 32px;border-radius:6px;font-weight:bold;font-size:15px;">Open Bill Split</a>
+            <a href="#{bill_link}" style="display:inline-block;background-color:#1a1a1a;color:#ffffff;text-decoration:none;padding:13px 32px;border-radius:6px;font-weight:bold;font-size:15px;">Open Bill Split</a>
           </div>
         BTN
       else
@@ -96,7 +101,7 @@ module FinanceTracker
             <tr><td align="center">
               <table width="560" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);max-width:560px;">
 
-                <tr><td style="background-color:#2FA4E7;padding:20px 32px;">
+                <tr><td style="background-color:#1a1a1a;padding:20px 32px;">
                   <span style="color:#ffffff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Fintrack</span>
                 </td></tr>
 
@@ -111,7 +116,7 @@ module FinanceTracker
                       <p style="margin:0 0 4px;font-size:12px;color:#999;text-transform:uppercase;letter-spacing:0.5px;">Bill</p>
                       <p style="margin:0 0 16px;font-size:18px;font-weight:bold;color:#333;">#{@bill.title}</p>
                       <p style="margin:0 0 4px;font-size:12px;color:#999;text-transform:uppercase;letter-spacing:0.5px;">Amount Due</p>
-                      <p style="margin:0;font-size:26px;font-weight:bold;color:#2FA4E7;">$#{amount}</p>
+                      <p style="margin:0;font-size:26px;font-weight:bold;color:#1a1a1a;">$#{amount}</p>
                     </td></tr>
                   </table>
 

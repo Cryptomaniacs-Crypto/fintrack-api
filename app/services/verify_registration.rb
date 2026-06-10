@@ -83,7 +83,7 @@ module FinanceTracker
 
         Thanks for signing up for Fintrack!
 
-        Click the link below to verify your email address and activate your account:
+        Click the link below to verify your email address, set your password,and activate your account:
 
         #{verification_url}
 
@@ -102,7 +102,7 @@ module FinanceTracker
             <tr><td align="center">
               <table width="560" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);max-width:560px;">
 
-                <tr><td style="background-color:#2FA4E7;padding:20px 32px;">
+                <tr><td style="background-color:#1a1a1a;padding:20px 32px;">
                   <span style="color:#ffffff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Fintrack</span>
                 </td></tr>
 
@@ -116,7 +116,7 @@ module FinanceTracker
                   </p>
 
                   <div style="text-align:center;margin-bottom:28px;">
-                    <a href="#{verification_url}" style="display:inline-block;background-color:#2FA4E7;color:#ffffff;text-decoration:none;padding:13px 32px;border-radius:6px;font-weight:bold;font-size:15px;">Verify Account</a>
+                    <a href="#{verification_url}" style="display:inline-block;background-color:#1a1a1a;color:#ffffff;text-decoration:none;padding:13px 32px;border-radius:6px;font-weight:bold;font-size:15px;">Verify Account</a>
                   </div>
 
                   <p style="margin:0;font-size:13px;color:#aaa;line-height:1.6;">
