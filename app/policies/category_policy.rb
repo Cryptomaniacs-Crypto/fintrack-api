@@ -17,7 +17,7 @@ module FinanceTracker
     end
 
     def can_edit?
-      can_write? && !@account.nil?
+      can_write? && !@account.nil? && !@category&.is_default
     end
 
     def can_delete?

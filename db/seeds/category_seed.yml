@@ -1,5 +1,7 @@
 - name: "Food"
   description: "Meals and groceries"
+  is_default: true
 
 - name: "Entertainment"
   description: "Movies, games, etc."
+  is_default: true

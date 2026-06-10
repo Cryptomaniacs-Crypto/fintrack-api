@@ -22,7 +22,8 @@ module FinanceTracker
             attributes: {
               id:,
               name:,
-              description:
+              description:,
+              is_default:
             }
           },
           included: {
