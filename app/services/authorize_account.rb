@@ -24,14 +24,18 @@ module FinanceTracker
       end
     end
 
-    # `mint_scope` is the scope baked into the API-key token handed back to the
-    # owner; `auth` is the requester's AuthorizedAccount (their session token).
-    def self.call(auth:, username:, mint_scope: AuthScope::READ_ONLY)
+    # `auth` is the requester's AuthorizedAccount (their session token).
+    # `requested_scope` is an optional scope string from the caller; the minted
+    # token will carry that scope, capped to the caller's own scope so a caller
+    # can never mint a token broader than what they already hold. Omitting it (or
+    # passing an invalid / broader value) falls back to READ_ONLY.
+    def self.call(auth:, username:, requested_scope: nil)
       target = GetAccountByUsername.call(username:)
       requester = requester_for(auth)
       envelope = base_envelope(target)
       return envelope unless requester
 
+      mint_scope = resolve_mint_scope(requested_scope, auth&.scope)
       add_authorization!(envelope, target, requester, auth, mint_scope)
       envelope
     end
@@ -48,6 +52,19 @@ module FinanceTracker
 
       envelope['capabilities'] = policy.capabilities
       envelope['account_api_token'] = AuthorizedAccount.new(envelope, mint_scope, account_id: target.id).token
+    end
+
+    # Resolves the scope to bake into the minted API-key token.
+    # The requested scope must be well-formed AND a strict subset of the
+    # caller's own scope — otherwise we fall back to READ_ONLY so a bad or
+    # over-broad request can never escalate privilege.
+    def self.resolve_mint_scope(requested, caller_scope)
+      return AuthScope::READ_ONLY unless requested
+
+      parsed = AuthScope.new(requested)
+      return AuthScope::READ_ONLY unless parsed.valid? && parsed.subset_of?(caller_scope || AuthScope.new)
+
+      requested
     end
 
     def self.requester_for(auth)

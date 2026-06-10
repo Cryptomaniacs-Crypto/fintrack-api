@@ -206,7 +206,8 @@ module FinanceTracker
             # receives a limited-scope (READ_ONLY) auth_token to use as an API key.
             routing.is do
               routing.get do
-                envelope = AuthorizeAccount.call(auth: @auth, username:)
+                envelope = AuthorizeAccount.call(auth: @auth, username:,
+                                                 requested_scope: routing.params['scope'])
                 envelope.to_json
               rescue GetAccountByUsername::AccountNotFoundError => e
                 routing.halt 404, { message: e.message }.to_json
@@ -218,6 +219,7 @@ module FinanceTracker
               routing.put do
                 current_account = current_account_from_auth
                 routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+                scope_allows_write!(routing, 'accounts')
 
                 target = Account.first(username:)
                 routing.halt 404, { message: 'Account not found' }.to_json unless target
@@ -242,11 +244,10 @@ module FinanceTracker
               # GET api/v1/accounts/[username]/roles
               routing.get do
                 current_account = current_account_from_auth
+                routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
                 target = Account.first(username:)
-                if current_account
-                  routing.halt 403, { message: 'Only admins can manage system roles' }.to_json unless
-                    ::FinanceTracker::SystemRolePolicy.new(current_account, target, auth_scope: auth_scope).can_manage?
-                end
+                routing.halt 403, { message: 'Only admins can manage system roles' }.to_json unless
+                  ::FinanceTracker::SystemRolePolicy.new(current_account, target, auth_scope: auth_scope).can_manage?
 
                 roles = ListAccountRoles.call(username:).map { |role| { id: role.id, name: role.name } }
                 output = { data: roles }
@@ -293,22 +294,17 @@ module FinanceTracker
 
         routing.on 'wallets' do
           @wallet_route = "#{@api_root}/wallets"
+          routing.halt 401, { message: 'Authentication required' }.to_json unless current_account_from_auth
 
           # GET api/v1/wallets/[wallet_id]
           routing.get String do |wallet_id|
             wallet = Wallet.first(id: wallet_id)
             current_account = current_account_from_auth
-            if current_account
-              routing.halt(404, { message: 'Wallet not found' }.to_json) unless ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).can_view?
-            end
+            routing.halt(404, { message: 'Wallet not found' }.to_json) unless ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).can_view?
 
-            if wallet
-              envelope = JSON.parse(wallet.to_json)
-              envelope['policies'] = ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).summary if current_account
-              envelope.to_json
-            else
-              raise('Wallet not found')
-            end
+            envelope = JSON.parse(wallet.to_json)
+            envelope['policies'] = ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).summary
+            envelope.to_json
           rescue StandardError => e
             routing.halt 404, { message: e.message }.to_json
           end
@@ -316,10 +312,10 @@ module FinanceTracker
           # GET api/v1/wallets
           routing.get do
             current_account = current_account_from_auth
-            wallets = current_account ? ::FinanceTracker::WalletScope.new(current_account).viewable.all : Wallet.all
+            wallets = ::FinanceTracker::WalletScope.new(current_account).viewable.all
             payload = wallets.map do |wallet|
               envelope = JSON.parse(wallet.to_json)
-              envelope['policies'] = ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).index_summary if current_account
+              envelope['policies'] = ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).index_summary
               envelope
             end
             { data: payload }.to_json
@@ -352,22 +348,18 @@ module FinanceTracker
 
         routing.on 'categories' do
           @category_route = "#{@api_root}/categories"
+          routing.halt 401, { message: 'Authentication required' }.to_json unless current_account_from_auth
 
           # GET api/v1/categories/[category_id]
           routing.get String do |category_id|
             category = Category.first(id: category_id)
             current_account = current_account_from_auth
-            if current_account
-              routing.halt(404, { message: 'Category not found' }.to_json) unless ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).can_view?
-            end
+            routing.halt(404, { message: 'Category not found' }.to_json) unless category
+            routing.halt(404, { message: 'Category not found' }.to_json) unless ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).can_view?
 
-            if category
-              envelope = JSON.parse(category.to_json)
-              envelope['policies'] = ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).summary if current_account
-              envelope.to_json
-            else
-              raise('Category not found')
-            end
+            envelope = JSON.parse(category.to_json)
+            envelope['policies'] = ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).summary
+            envelope.to_json
           rescue StandardError => e
             routing.halt 404, { message: e.message }.to_json
           end
@@ -375,10 +367,10 @@ module FinanceTracker
           # GET api/v1/categories
           routing.get do
             current_account = current_account_from_auth
-            categories = current_account ? ::FinanceTracker::CategoryScope.new(current_account).viewable.all : Category.all
+            categories = ::FinanceTracker::CategoryScope.new(current_account).viewable.all
             payload = categories.map do |category|
               envelope = JSON.parse(category.to_json)
-              envelope['policies'] = ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).index_summary if current_account
+              envelope['policies'] = ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).index_summary
               envelope
             end
             { data: payload }.to_json
@@ -411,6 +403,7 @@ module FinanceTracker
 
         routing.on 'transactions' do
           @transaction_route = "#{@api_root}/transactions"
+          routing.halt 401, { message: 'Authentication required' }.to_json unless current_account_from_auth
 
           routing.on String do |transaction_id|
             routing.on 'wallet' do
@@ -419,7 +412,7 @@ module FinanceTracker
                 transaction = Transaction.first(id: transaction_id)
                 wallet = transaction&.wallet
                 current_account = current_account_from_auth
-                if current_account && wallet
+                if wallet
                   routing.halt(404, { message: 'Wallet not found' }.to_json) unless ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).can_view?
                 end
                 wallet ? wallet.to_json : raise('Wallet not found')
@@ -434,7 +427,7 @@ module FinanceTracker
                 transaction = Transaction.first(id: transaction_id)
                 category = transaction&.category
                 current_account = current_account_from_auth
-                if current_account && category
+                if category
                   routing.halt(404, { message: 'Category not found' }.to_json) unless ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).can_view?
                 end
                 category ? category.to_json : raise('Category not found')
@@ -452,7 +445,7 @@ module FinanceTracker
                 wallet = transaction&.wallet
                 wallet = nil unless wallet&.id.to_s == wallet_id.to_s
                 current_account = current_account_from_auth
-                if current_account && wallet
+                if wallet
                   routing.halt(404, { message: 'Wallet not found' }.to_json) unless ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).can_view?
                 end
                 wallet ? wallet.to_json : raise('Wallet not found')
@@ -467,7 +460,7 @@ module FinanceTracker
 
                 current_account = current_account_from_auth
                 wallet = transaction.wallet
-                if current_account && wallet
+                if wallet
                   routing.halt(404, { message: 'Wallet not found' }.to_json) unless ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).can_view?
                 end
 
@@ -512,7 +505,7 @@ module FinanceTracker
                 category = transaction&.category
                 category = nil unless category&.id.to_s == category_id.to_s
                 current_account = current_account_from_auth
-                if current_account && category
+                if category
                   routing.halt(404, { message: 'Category not found' }.to_json) unless ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).can_view?
                 end
                 category ? category.to_json : raise('Category not found')
@@ -527,7 +520,7 @@ module FinanceTracker
 
                 current_account = current_account_from_auth
                 category = transaction.category
-                if current_account && category
+                if category
                   routing.halt(404, { message: 'Category not found' }.to_json) unless ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).can_view?
                 end
 
@@ -565,16 +558,12 @@ module FinanceTracker
             routing.get do
               transaction = Transaction.first(id: transaction_id)
               current_account = current_account_from_auth
-              if current_account && transaction
-                routing.halt(404, { message: 'Transaction not found' }.to_json) unless ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope).can_view?
-              end
-              if transaction
-                envelope = JSON.parse(transaction.to_json)
-                envelope['policies'] = ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope).summary if current_account
-                envelope.to_json
-              else
-                raise('Transaction not found')
-              end
+              routing.halt(404, { message: 'Transaction not found' }.to_json) unless transaction
+              routing.halt(404, { message: 'Transaction not found' }.to_json) unless ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope).can_view?
+
+              envelope = JSON.parse(transaction.to_json)
+              envelope['policies'] = ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope).summary
+              envelope.to_json
             rescue StandardError => e
               routing.halt 404, { message: e.message }.to_json
             end
@@ -588,10 +577,8 @@ module FinanceTracker
               transaction = Transaction.first(id: transaction_id)
               routing.halt 404, { message: 'Transaction not found' }.to_json unless transaction
 
-              if current_account
-                policy = ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope)
-                routing.halt 403, { message: 'Not authorized' }.to_json unless policy.can_edit?
-              end
+              policy = ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope)
+              routing.halt 403, { message: 'Not authorized' }.to_json unless policy.can_edit?
 
               amount_val = data.delete('amount') || data.delete(:amount)
               safe = data.slice('title', 'transaction_date', 'note', 'category_id')
@@ -619,10 +606,8 @@ module FinanceTracker
               transaction = Transaction.first(id: transaction_id)
               routing.halt 404, { message: 'Transaction not found' }.to_json unless transaction
 
-              if current_account
-                policy = ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope)
-                routing.halt 403, { message: 'Not authorized' }.to_json unless policy.can_delete?
-              end
+              policy = ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope)
+              routing.halt 403, { message: 'Not authorized' }.to_json unless policy.can_delete?
 
               transaction.destroy
               response.status = 204
@@ -636,13 +621,13 @@ module FinanceTracker
           # GET api/v1/transactions[?wallet_id=]
           routing.get do
             current_account = current_account_from_auth
-            scope = current_account ? ::FinanceTracker::TransactionScope.new(current_account).viewable : Transaction
+            scope = ::FinanceTracker::TransactionScope.new(current_account).viewable
             wallet_id = routing.params['wallet_id']
             scope = scope.where(wallet_id: wallet_id) if wallet_id
             transactions = scope.order(Sequel.desc(:transaction_date)).all
             payload = transactions.map do |transaction|
               envelope = JSON.parse(transaction.to_json)
-              envelope['policies'] = ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope).index_summary if current_account
+              envelope['policies'] = ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope).index_summary
               envelope
             end
             output = { data: payload }
@@ -891,12 +876,11 @@ module FinanceTracker
       @resolved_auth_scope ||= @auth&.scope || AuthScope.new
     end
 
-    # Enforce the token's write scope on mutating routes. Only applies when a
-    # token is present: anonymous requests keep their existing (open) behavior,
-    # so this narrows authenticated tokens (e.g. a READ_ONLY API key) without
-    # changing the unauthenticated surface.
+    # Enforce authentication and write-scope on mutating routes.
+    # Anonymous requests are rejected with 401; authenticated tokens that lack
+    # write permission for the resource are rejected with 403.
     def scope_allows_write!(routing, resource)
-      return unless @auth
+      routing.halt 401, { message: 'Authentication required' }.to_json unless @auth
       return if auth_scope.can_write?(resource)
 
       routing.halt 403, { message: "Auth token scope does not permit writing #{resource}" }.to_json
