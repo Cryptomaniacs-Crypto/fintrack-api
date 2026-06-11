@@ -38,6 +38,17 @@ module FinanceTracker
       self.email_hash   = SecureDB.hash(plaintext)
     end
 
+    # Home-banner cover photo (base64), stored encrypted like payment proofs.
+    def banner_image
+      banner_image_secure.nil? ? nil : SecureDB.decrypt(banner_image_secure)
+    end
+
+    def banner_image=(base64)
+      self.banner_image_secure = base64.to_s.empty? ? nil : SecureDB.encrypt(base64)
+    end
+
+    def banner? = !banner_image_secure.nil?
+
     def password=(new_password)
       self.password_digest = Password.digest(new_password).to_s
     end
