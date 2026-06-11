@@ -240,6 +240,46 @@ module FinanceTracker
               end
             end
 
+            # /api/v1/accounts/[username]/banner -- per-user home cover photo
+            routing.on 'banner' do
+              current_account = current_account_from_auth
+              routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+              target = Account.first(username:)
+              routing.halt 404, { message: 'Account not found' }.to_json unless target
+              policy = ::FinanceTracker::AccountPolicy.new(current_account, target, auth_scope: auth_scope)
+
+              # GET -- owner/admin fetches the cover image (base64 + type)
+              routing.get do
+                routing.halt 403, { message: 'Not allowed' }.to_json unless policy.can_view?
+                routing.halt 404, { message: 'No banner' }.to_json unless target.banner?
+                { image_base64: target.banner_image, content_type: target.banner_content_type }.to_json
+              end
+
+              # PUT -- owner uploads/replaces the cover image
+              routing.put do
+                routing.halt 403, { message: 'Not allowed' }.to_json unless policy.can_edit?
+                scope_allows_write!(routing, 'accounts')
+                data = HttpRequest.new(routing).body_data
+                type = ::FinanceTracker::ImageProof.validate!(data[:image_base64], data[:content_type])
+                target.banner_image = data[:image_base64]
+                target.banner_content_type = type
+                target.save_changes
+                { message: 'Banner updated' }.to_json
+              rescue ::FinanceTracker::ImageProof::InvalidImage => e
+                routing.halt 400, { message: e.message }.to_json
+              end
+
+              # DELETE -- owner removes the cover image
+              routing.delete do
+                routing.halt 403, { message: 'Not allowed' }.to_json unless policy.can_edit?
+                scope_allows_write!(routing, 'accounts')
+                target.banner_image = nil
+                target.banner_content_type = nil
+                target.save_changes
+                { message: 'Banner removed' }.to_json
+              end
+            end
+
             routing.on 'roles' do
               @account_roles_route = "#{@api_root}/accounts/#{username}/roles"
 
