@@ -19,15 +19,27 @@ describe 'Test Account API' do
   end
 
   describe 'Account information' do
-    it 'HAPPY: should be able to get details of a single account by username' do
+    it 'HAPPY: anonymous detail returns the public profile (username/avatar) without PII' do
       FinanceTracker::CreateAccount.call(account_data:)
 
       get "/api/v1/accounts/#{account_data['username']}"
       _(last_response.status).must_equal 200
 
-      result = JSON.parse last_response.body
-      _(result['data']['attributes']['username']).must_equal account_data['username']
-      _(result['data']['attributes']['email']).must_equal account_data['email']
+      attrs = JSON.parse(last_response.body)['data']['attributes']
+      _(attrs['username']).must_equal account_data['username']
+      _(attrs['avatar']).must_equal account_data['avatar']
+      # SECURITY: anonymous callers must not receive email or system roles.
+      _(attrs).wont_include 'email'
+      _(last_response.body).wont_include account_data['email']
+      _(JSON.parse(last_response.body)).wont_include 'included'
+    end
+
+    it 'HAPPY: the owner still sees their own email when authenticated' do
+      created = FinanceTracker::CreateAccount.call(account_data:)
+
+      get "/api/v1/accounts/#{account_data['username']}", nil, auth_header(created)
+      _(last_response.status).must_equal 200
+      _(JSON.parse(last_response.body)['data']['attributes']['email']).must_equal account_data['email']
     end
 
     it 'HAPPY: should include policy data for the requesting account' do
@@ -61,20 +73,29 @@ describe 'Test Account API' do
   end
 
   describe 'Searching by email' do
-    it 'HAPPY: should find account by email via HMAC lookup' do
+    it 'HAPPY: an authenticated caller finds an account by email (public profile only)' do
+      created = FinanceTracker::CreateAccount.call(account_data:)
+
+      get "/api/v1/accounts?email=#{account_data['email']}", nil, auth_header(created)
+      _(last_response.status).must_equal 200
+
+      attrs = JSON.parse(last_response.body)['data']['attributes']
+      _(attrs['username']).must_equal account_data['username']
+      # SECURITY: the lookup returns only the public profile, never email/roles.
+      _(attrs).wont_include 'email'
+    end
+
+    it 'SECURITY: rejects unauthenticated email lookup (closes the enumeration oracle)' do
       FinanceTracker::CreateAccount.call(account_data:)
 
       get "/api/v1/accounts?email=#{account_data['email']}"
-      _(last_response.status).must_equal 200
-
-      result = JSON.parse last_response.body
-      _(result['data']['attributes']['username']).must_equal account_data['username']
+      _(last_response.status).must_equal 401
     end
 
     it 'SAD: should return 404 if email not found' do
-      FinanceTracker::CreateAccount.call(account_data:)
+      created = FinanceTracker::CreateAccount.call(account_data:)
 
-      get '/api/v1/accounts?email=nobody@example.com'
+      get '/api/v1/accounts?email=nobody@example.com', nil, auth_header(created)
       _(last_response.status).must_equal 404
     end
 
