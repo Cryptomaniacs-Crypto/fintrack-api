@@ -160,6 +160,32 @@ namespace :db do
       end
     end
   end
+
+  desc 'Erase financial data (transactions, wallets, bill splits) but KEEP ' \
+       'accounts, roles, SSO identities, and default categories'
+  task wipe_data: :load_models do
+    db = FinanceTracker::Api.DB
+    # Child-first deletion order so foreign keys never block a delete.
+    %i[
+      bill_split_item_shares bill_split_items bill_split_participants
+      bill_splits split_agreements transactions wallets
+    ].each do |table|
+      next unless db.tables.include?(table)
+
+      puts "#{table}: #{db[table].delete} rows deleted"
+    end
+
+    if db.tables.include?(:categories)
+      removed = db[:categories].exclude(is_default: true).delete
+      puts "categories (non-default): #{removed} rows deleted"
+    end
+
+    puts "--- kept ---"
+    puts "accounts:           #{db[:accounts].count}"
+    puts "roles:              #{db[:roles].count}" if db.tables.include?(:roles)
+    puts "sso_identities:     #{db[:sso_identities].count}" if db.tables.include?(:sso_identities)
+    puts "default categories: #{db[:categories].where(is_default: true).count}"
+  end
 end
 
 desc 'Delete all data and reseed'
