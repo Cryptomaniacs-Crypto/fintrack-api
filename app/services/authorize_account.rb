@@ -32,9 +32,12 @@ module FinanceTracker
     def self.call(auth:, username:, requested_scope: nil)
       target = GetAccountByUsername.call(username:)
       requester = requester_for(auth)
-      envelope = base_envelope(target)
-      return envelope unless requester
+      # Anonymous callers get only the minimal public profile (username +
+      # avatar) -- never email, system roles, or anything that enables
+      # unauthenticated PII disclosure / email<->identity correlation.
+      return { 'data' => target.public_summary } unless requester
 
+      envelope = base_envelope(target)
       mint_scope = resolve_mint_scope(requested_scope, auth&.scope)
       add_authorization!(envelope, target, requester, auth, mint_scope)
       envelope

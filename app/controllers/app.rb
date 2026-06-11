@@ -152,9 +152,15 @@ module FinanceTracker
               email = routing.params['email']
 
               if email
-                # GET api/v1/accounts?email=... (search by email via HMAC hash)
+                # GET api/v1/accounts?email=... (search by email via HMAC hash).
+                # Requires auth -- otherwise this is an unauthenticated oracle
+                # that confirms which emails are registered and maps them to a
+                # username. Returns only the minimal public profile (no email/
+                # roles), so a caller can't harvest PII for arbitrary emails.
+                current_account = current_account_from_auth
+                routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
                 account = FindAccountByEmail.call(email:)
-                next(account ? account.to_json : routing.halt(404, { message: 'Account not found' }.to_json))
+                next(account ? { data: account.public_summary }.to_json : routing.halt(404, { message: 'Account not found' }.to_json))
               end
 
               # GET api/v1/accounts  (admin-only index)
