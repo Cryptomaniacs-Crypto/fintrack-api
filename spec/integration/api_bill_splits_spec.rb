@@ -170,6 +170,49 @@ describe 'Bill Splits API' do
     end
   end
 
+  describe 'viewer-scoped serialization (least privilege)' do
+    before do
+      @id = create_draft['id'] # alice (owner) + bob + carol
+      patch "api/v1/bill-splits/#{@id}", {
+        tax_percent: '10', service_percent: '5',
+        items: [
+          { name: 'Pizza', amount: '30', sharer_usernames: %w[alice bob carol] },
+          { name: 'Wine',  amount: '20', sharer_usernames: %w[alice bob] },
+          { name: 'Cake',  amount: '9',  sharer_usernames: %w[carol] }
+        ]
+      }.to_json, @json.merge(auth_header_for(@alice))
+    end
+
+    it 'gives the owner the full breakdown of everyone' do
+      get "api/v1/bill-splits/#{@id}", {}, auth_header_for(@alice)
+      _(last_response.status).must_equal 200
+      _(attrs['participants'].map { |p| p['username'] }.sort).must_equal %w[alice bob carol]
+      _(attrs['items'].first).must_include 'sharer_usernames'
+    end
+
+    it 'gives a participant only their own share, itemized, with no one else exposed' do
+      get "api/v1/bill-splits/#{@id}", {}, auth_header_for(@bob)
+      _(last_response.status).must_equal 200
+
+      # only bob's own row — carol/alice never appear
+      _(attrs['participants'].map { |p| p['username'] }).must_equal ['bob']
+      _(attrs['viewer_is_owner']).must_equal false
+
+      # bob is on Pizza + Wine, not Cake
+      names = attrs['items'].map { |i| i['name'] }.sort
+      _(names).must_equal %w[Pizza Wine]
+
+      # itemized share is present; other people's identities are NOT
+      pizza = attrs['items'].find { |i| i['name'] == 'Pizza' }
+      _(pizza['shared_by_count']).must_equal 3
+      _(pizza['your_share']).must_equal '10.0'
+      _(pizza).wont_include 'sharer_usernames'
+
+      # the raw response body must not leak carol anywhere
+      _(last_response.body).wont_include 'carol'
+    end
+  end
+
   describe 'wallet-backed settlement' do
     # A valid 1x1 PNG (correct magic bytes) for proof-image tests.
     PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='

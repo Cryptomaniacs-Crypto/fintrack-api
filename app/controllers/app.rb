@@ -837,9 +837,10 @@ module FinanceTracker
             routing.halt 403, { message: 'Not authorized to access this bill split' }.to_json unless bill.participant?(current_account)
 
             routing.is do
-              # GET api/v1/bill-splits/[id] — detail + per-person breakdown
+              # GET api/v1/bill-splits/[id] — detail. Owner gets the full
+              # breakdown; a participant gets only their own itemized share.
               routing.get do
-                bill.to_json
+                bill.to_json_for(current_account)
               end
 
               # PATCH api/v1/bill-splits/[id] — creator edits dishes/tax/service while editable
