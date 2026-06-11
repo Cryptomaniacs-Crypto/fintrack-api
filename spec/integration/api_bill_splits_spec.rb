@@ -213,6 +213,51 @@ describe 'Bill Splits API' do
     end
   end
 
+  describe 'source receipt photo' do
+    RECEIPT_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+
+    before { @id = create_draft['id'] } # alice owner; bob + carol participants
+
+    def upload_receipt(account, base64: RECEIPT_PNG, type: 'image/png')
+      post "api/v1/bill-splits/#{@id}/receipt",
+           { image_base64: base64, content_type: type }.to_json,
+           @json.merge(auth_header_for(account))
+    end
+
+    it 'lets the owner upload a receipt and flags has_receipt' do
+      upload_receipt(@alice)
+      _(last_response.status).must_equal 200
+
+      get "api/v1/bill-splits/#{@id}", {}, auth_header_for(@alice)
+      _(attrs['has_receipt']).must_equal true
+    end
+
+    it 'lets any participant view the uploaded receipt' do
+      upload_receipt(@alice)
+      get "api/v1/bill-splits/#{@id}/receipt", {}, auth_header_for(@bob)
+      _(last_response.status).must_equal 200
+      _(JSON.parse(last_response.body)['image_base64']).must_equal RECEIPT_PNG
+    end
+
+    it 'forbids a non-owner participant from uploading' do
+      upload_receipt(@bob)
+      _(last_response.status).must_equal 403
+    end
+
+    it 'rejects an image whose bytes do not match the declared type' do
+      upload_receipt(@alice, base64: Base64.strict_encode64('not a png'))
+      _(last_response.status).must_equal 400
+    end
+
+    it 'lets the owner remove the receipt' do
+      upload_receipt(@alice)
+      delete "api/v1/bill-splits/#{@id}/receipt", {}, auth_header_for(@alice)
+      _(last_response.status).must_equal 200
+      get "api/v1/bill-splits/#{@id}", {}, auth_header_for(@alice)
+      _(attrs['has_receipt']).must_equal false
+    end
+  end
+
   describe 'wallet-backed settlement' do
     # A valid 1x1 PNG (correct magic bytes) for proof-image tests.
     PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='

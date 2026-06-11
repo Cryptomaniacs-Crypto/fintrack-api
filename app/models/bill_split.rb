@@ -25,6 +25,18 @@ module FinanceTracker
     plugin :whitelist_security
     set_allowed_columns :creator_id, :title, :tax_percent, :service_percent, :category_id
 
+    # The owner's optional source-receipt photo, encrypted at rest. Participants
+    # may view it to verify the entered prices match the real bill.
+    def receipt_image
+      SecureDB.decrypt(receipt_image_secure)
+    end
+
+    def receipt_image=(base64)
+      self.receipt_image_secure = base64.to_s.empty? ? nil : SecureDB.encrypt(base64)
+    end
+
+    def receipt? = !receipt_image_secure.nil?
+
     # note is an optional sensitive free-text field, encrypted at rest.
     def note
       SecureDB.decrypt(note_secure)
@@ -181,6 +193,7 @@ module FinanceTracker
         creator_username: creator&.username,
         creator_wallet_id:,
         grand_total:,
+        has_receipt: receipt?,
         sent_at:,
         settled_at:,
         created_at:,
@@ -252,6 +265,7 @@ module FinanceTracker
         creator_username: creator&.username,
         grand_total:,
         participant_count: participants.count,
+        has_receipt: receipt?,
         viewer_is_owner: false,
         sent_at:,
         settled_at:,

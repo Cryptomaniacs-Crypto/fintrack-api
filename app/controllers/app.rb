@@ -6,6 +6,7 @@ require 'json'
 require_relative '../../config/environments'
 require_relative 'http_request'
 require_relative '../lib/auth_scope'
+require_relative '../lib/image_proof'
 require_relative '../lib/google_id_token'
 require_relative '../models/transaction'
 require_relative '../models/wallet'
@@ -979,6 +980,48 @@ module FinanceTracker
               routing.halt 403, { message: e.message }.to_json
             rescue PayBillSplitShare::InvalidInput => e
               routing.halt 400, { message: e.message }.to_json
+            end
+
+            # api/v1/bill-splits/[id]/receipt — the bill's source-receipt photo.
+            # Owner uploads/removes; any participant may view it to check amounts.
+            routing.on 'receipt' do
+              # POST — owner uploads (base64 image, validated like payment proofs)
+              routing.post do
+                scope_allows_write!(routing, 'transactions')
+                routing.halt 403, { message: 'Only the creator can upload a receipt' }.to_json unless bill.creator?(current_account)
+
+                payload = HttpRequest.new(routing).body_data
+                base64  = payload[:image_base64] || payload['image_base64']
+                ctype   = payload[:content_type] || payload['content_type']
+                begin
+                  validated = FinanceTracker::ImageProof.validate!(base64, ctype)
+                rescue FinanceTracker::ImageProof::InvalidImage => e
+                  routing.halt 400, { message: e.message }.to_json
+                end
+
+                bill.receipt_image = base64
+                bill.receipt_content_type = validated
+                bill.save_changes
+                { message: 'Receipt uploaded' }.to_json
+              end
+
+              # GET — any participant (owner included) may view the receipt
+              routing.get do
+                routing.halt 404, { message: 'No receipt uploaded' }.to_json unless bill.receipt?
+
+                { content_type: bill.receipt_content_type, image_base64: bill.receipt_image }.to_json
+              end
+
+              # DELETE — owner removes it
+              routing.delete do
+                scope_allows_write!(routing, 'transactions')
+                routing.halt 403, { message: 'Only the creator can remove the receipt' }.to_json unless bill.creator?(current_account)
+
+                bill.receipt_image = nil
+                bill.receipt_content_type = nil
+                bill.save_changes
+                { message: 'Receipt removed' }.to_json
+              end
             end
 
             routing.on 'participants' do
