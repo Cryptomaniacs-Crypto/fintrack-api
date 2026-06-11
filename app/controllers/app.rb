@@ -344,8 +344,9 @@ module FinanceTracker
             routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
 
             # GET api/v1/friends -- list the account's saved friends
+            # (username + avatar only; never another user's email/PII).
             routing.get do
-              { data: current_account.friends.map { |f| JSON.parse(f.to_json)['data'] } }.to_json
+              { data: current_account.friends.map(&:public_summary) }.to_json
             end
 
             # POST api/v1/friends  body: { username }
@@ -355,7 +356,7 @@ module FinanceTracker
               friend = AddFriend.call(account: current_account, username:)
 
               response.status = 201
-              { message: 'Friend added', data: JSON.parse(friend.to_json)['data'] }.to_json
+              { message: 'Friend added', data: friend.public_summary }.to_json
             rescue AddFriend::UnknownUserError => e
               routing.halt 404, { message: e.message }.to_json
             rescue AddFriend::AlreadyFriendError => e

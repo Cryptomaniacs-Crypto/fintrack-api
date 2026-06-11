@@ -32,6 +32,15 @@ describe 'Friends API' do
       _(usernames).must_equal %w[bob]
     end
 
+    it 'does not leak a friend\'s email or other PII' do
+      add_friend('bob')
+      get 'api/v1/friends', {}, auth_header_for(@alice)
+
+      attrs = JSON.parse(last_response.body)['data'].first['attributes']
+      _(attrs.keys.sort).must_equal %w[avatar id username] # no 'email'
+      _(last_response.body).wont_include 'bob@example.com'
+    end
+
     it 'requires authentication' do
       get 'api/v1/friends', {}, @json
       _(last_response.status).must_equal 401

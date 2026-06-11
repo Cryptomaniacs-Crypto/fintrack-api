@@ -49,7 +49,17 @@ module FinanceTracker
 
     def self.create_categories
       CATEGORIES_INFO.each do |category_info|
-        FinanceTracker::Category.first(name: category_info['name']) || FinanceTracker::Category.create(category_info)
+        next if FinanceTracker::Category.first(name: category_info['name'])
+
+        # `is_default` is a system flag, intentionally NOT mass-assignable
+        # (model whitelist), so set it via the direct setter after create.
+        info = category_info.transform_keys(&:to_s)
+        is_default = info.delete('is_default')
+        category = FinanceTracker::Category.create(info)
+        next unless is_default
+
+        category.is_default = true
+        category.save_changes
       end
     end
 

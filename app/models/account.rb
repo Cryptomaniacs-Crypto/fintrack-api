@@ -83,5 +83,19 @@ module FinanceTracker
         }, options
       )
     end
+
+    # Minimal view of an account as seen by *another* user (e.g. a friends
+    # list). Deliberately omits email and any PII -- only what the UI needs to
+    # show someone: their handle and avatar. Returns the inner `data` envelope.
+    def public_summary
+      {
+        type: 'account',
+        attributes: {
+          id:,
+          username:,
+          avatar:
+        }
+      }
+    end
   end
 end
