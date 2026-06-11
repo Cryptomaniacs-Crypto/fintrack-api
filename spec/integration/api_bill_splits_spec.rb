@@ -170,6 +170,94 @@ describe 'Bill Splits API' do
     end
   end
 
+  describe 'viewer-scoped serialization (least privilege)' do
+    before do
+      @id = create_draft['id'] # alice (owner) + bob + carol
+      patch "api/v1/bill-splits/#{@id}", {
+        tax_percent: '10', service_percent: '5',
+        items: [
+          { name: 'Pizza', amount: '30', sharer_usernames: %w[alice bob carol] },
+          { name: 'Wine',  amount: '20', sharer_usernames: %w[alice bob] },
+          { name: 'Cake',  amount: '9',  sharer_usernames: %w[carol] }
+        ]
+      }.to_json, @json.merge(auth_header_for(@alice))
+    end
+
+    it 'gives the owner the full breakdown of everyone' do
+      get "api/v1/bill-splits/#{@id}", {}, auth_header_for(@alice)
+      _(last_response.status).must_equal 200
+      _(attrs['participants'].map { |p| p['username'] }.sort).must_equal %w[alice bob carol]
+      _(attrs['items'].first).must_include 'sharer_usernames'
+    end
+
+    it 'gives a participant only their own share, itemized, with no one else exposed' do
+      get "api/v1/bill-splits/#{@id}", {}, auth_header_for(@bob)
+      _(last_response.status).must_equal 200
+
+      # only bob's own row — carol/alice never appear
+      _(attrs['participants'].map { |p| p['username'] }).must_equal ['bob']
+      _(attrs['viewer_is_owner']).must_equal false
+
+      # bob is on Pizza + Wine, not Cake
+      names = attrs['items'].map { |i| i['name'] }.sort
+      _(names).must_equal %w[Pizza Wine]
+
+      # itemized share is present; other people's identities are NOT
+      pizza = attrs['items'].find { |i| i['name'] == 'Pizza' }
+      _(pizza['shared_by_count']).must_equal 3
+      _(pizza['your_share']).must_equal '10.0'
+      _(pizza).wont_include 'sharer_usernames'
+
+      # the raw response body must not leak carol anywhere
+      _(last_response.body).wont_include 'carol'
+    end
+  end
+
+  describe 'source receipt photo' do
+    RECEIPT_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+
+    before { @id = create_draft['id'] } # alice owner; bob + carol participants
+
+    def upload_receipt(account, base64: RECEIPT_PNG, type: 'image/png')
+      post "api/v1/bill-splits/#{@id}/receipt",
+           { image_base64: base64, content_type: type }.to_json,
+           @json.merge(auth_header_for(account))
+    end
+
+    it 'lets the owner upload a receipt and flags has_receipt' do
+      upload_receipt(@alice)
+      _(last_response.status).must_equal 200
+
+      get "api/v1/bill-splits/#{@id}", {}, auth_header_for(@alice)
+      _(attrs['has_receipt']).must_equal true
+    end
+
+    it 'lets any participant view the uploaded receipt' do
+      upload_receipt(@alice)
+      get "api/v1/bill-splits/#{@id}/receipt", {}, auth_header_for(@bob)
+      _(last_response.status).must_equal 200
+      _(JSON.parse(last_response.body)['image_base64']).must_equal RECEIPT_PNG
+    end
+
+    it 'forbids a non-owner participant from uploading' do
+      upload_receipt(@bob)
+      _(last_response.status).must_equal 403
+    end
+
+    it 'rejects an image whose bytes do not match the declared type' do
+      upload_receipt(@alice, base64: Base64.strict_encode64('not a png'))
+      _(last_response.status).must_equal 400
+    end
+
+    it 'lets the owner remove the receipt' do
+      upload_receipt(@alice)
+      delete "api/v1/bill-splits/#{@id}/receipt", {}, auth_header_for(@alice)
+      _(last_response.status).must_equal 200
+      get "api/v1/bill-splits/#{@id}", {}, auth_header_for(@alice)
+      _(attrs['has_receipt']).must_equal false
+    end
+  end
+
   describe 'wallet-backed settlement' do
     # A valid 1x1 PNG (correct magic bytes) for proof-image tests.
     PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='

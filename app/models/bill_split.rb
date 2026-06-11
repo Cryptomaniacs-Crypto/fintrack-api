@@ -25,6 +25,18 @@ module FinanceTracker
     plugin :whitelist_security
     set_allowed_columns :creator_id, :title, :tax_percent, :service_percent, :category_id
 
+    # The owner's optional source-receipt photo, encrypted at rest. Participants
+    # may view it to verify the entered prices match the real bill.
+    def receipt_image
+      SecureDB.decrypt(receipt_image_secure)
+    end
+
+    def receipt_image=(base64)
+      self.receipt_image_secure = base64.to_s.empty? ? nil : SecureDB.encrypt(base64)
+    end
+
+    def receipt? = !receipt_image_secure.nil?
+
     # note is an optional sensitive free-text field, encrypted at rest.
     def note
       SecureDB.decrypt(note_secure)
@@ -181,6 +193,7 @@ module FinanceTracker
         creator_username: creator&.username,
         creator_wallet_id:,
         grand_total:,
+        has_receipt: receipt?,
         sent_at:,
         settled_at:,
         created_at:,
@@ -200,6 +213,67 @@ module FinanceTracker
 
     def to_json(options = {})
       JSON({ data: { type: 'bill_split', attributes: to_h } }, options)
+    end
+
+    # Viewer-scoped serialization (least privilege):
+    # - the creator sees the full breakdown (everyone's shares + who shared what)
+    # - a non-owner participant sees ONLY their own share, itemized so they can
+    #   verify it, plus the bill total and headcount — but never another person's
+    #   amounts or identities, and not the owner's private note.
+    def to_h_for(viewer)
+      return to_h if creator?(viewer)
+
+      participant = participant_for(viewer)
+      return to_h unless participant # route already guards non-participants
+
+      participant_view(participant)
+    end
+
+    def to_json_for(viewer, options = {})
+      JSON({ data: { type: 'bill_split', attributes: to_h_for(viewer) } }, options)
+    end
+
+    # Each item the participant shares: full price, how many people split it
+    # (count only — not who), and this participant's portion. Enough to recompute
+    # their own number without exposing anyone else.
+    def itemized_share_for(participant)
+      items.select { |item| item.participants.any? { |p| p.id == participant.id } }
+           .map do |item|
+        count = item.participants.count
+        share = count.zero? ? BigDecimal('0') : BigDecimal(item.amount.to_s) / count
+        {
+          id: item.id,
+          name: item.name,
+          amount: item.amount,
+          shared_by_count: count,
+          your_share: money(share)
+        }
+      end
+    end
+
+    def participant_view(participant)
+      row = breakdown.find { |r| r[:participant_id] == participant.id }
+      {
+        id:,
+        title:,
+        tax_percent:,
+        service_percent:,
+        category_id:,
+        category_name: category&.name,
+        status:,
+        creator_id:,
+        creator_username: creator&.username,
+        grand_total:,
+        participant_count: participants.count,
+        has_receipt: receipt?,
+        viewer_is_owner: false,
+        sent_at:,
+        settled_at:,
+        created_at:,
+        updated_at:,
+        participants: row ? [row] : [],
+        items: itemized_share_for(participant)
+      }
     end
 
     private
