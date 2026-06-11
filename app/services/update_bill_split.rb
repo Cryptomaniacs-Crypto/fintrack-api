@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 module FinanceTracker
-  # Replaces a draft/disputed bill's dishes and bill-wide tax/service, then
+  # Replaces a draft/disputed bill's items and bill-wide tax/service, then
   # resets every participant back to pending so they re-review the revised
-  # amounts. Items are replaced wholesale: each dish carries a name, an amount,
+  # amounts. Items are replaced wholesale: each item carries a name, an amount,
   # and the set of participants who share it (matched by username or
   # participant id within this bill).
   class UpdateBillSplit
@@ -55,7 +55,7 @@ module FinanceTracker
 
         record = BillSplitItem.create(bill_split_id: bill.id, name:, amount: normalize_amount(item[:amount] || item['amount']))
         sharers = resolve_sharers(item, by_username, by_id)
-        raise InvalidInput, "Dish '#{name}' needs at least one person sharing it" if sharers.empty?
+        raise InvalidInput, "Item '#{name}' needs at least one person sharing it" if sharers.empty?
 
         sharers.each { |participant| record.add_participant(participant) }
       end
@@ -81,7 +81,7 @@ module FinanceTracker
     def self.normalize_amount(value)
       raw = value.to_s.strip
       parsed = Float(raw, exception: false)
-      raise InvalidInput, 'Each dish needs a positive amount' if parsed.nil? || parsed <= 0
+      raise InvalidInput, 'Each item needs a positive amount' if parsed.nil? || parsed <= 0
 
       raw
     end

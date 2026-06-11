@@ -14,7 +14,7 @@ module FinanceTracker
     class InvalidInput < StandardError; end
 
     def self.call(bill:, owner:, wallet_id: nil)
-      raise InvalidInput, 'Add at least one dish before sending' if bill.items.empty?
+      raise InvalidInput, 'Add at least one item before sending' if bill.items.empty?
       raise InvalidInput, 'Bill split is already settled' if bill.settled?
 
       FinanceTracker::Api.DB.transaction do

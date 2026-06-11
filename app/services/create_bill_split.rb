@@ -3,7 +3,7 @@
 module FinanceTracker
   # Creates a draft bill split from a title plus a list of participant
   # usernames. The creator is always included as a participant (they usually
-  # ate too); dishes and tax/service are added later via UpdateBillSplit.
+  # ate too); items and tax/service are added later via UpdateBillSplit.
   class CreateBillSplit
     class InvalidInput < StandardError; end
     class UnknownParticipant < StandardError; end
