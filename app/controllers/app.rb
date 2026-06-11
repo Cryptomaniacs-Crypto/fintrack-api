@@ -29,6 +29,8 @@ require_relative '../services/find_or_create_sso_account'
 require_relative '../services/verify_registration'
 require_relative '../services/assign_role_to_account'
 require_relative '../services/list_account_roles'
+require_relative '../services/add_friend'
+require_relative '../services/remove_friend'
 require_relative '../services/create_bill_split'
 require_relative '../services/update_bill_split'
 require_relative '../services/send_bill_split'
@@ -279,7 +281,7 @@ module FinanceTracker
 
                 # DELETE api/v1/accounts/[username]/roles/[role_name]
                 routing.delete do
-                  routing.halt 400, { message: 'Unknown role' }.to_json unless %w[admin creator member].include?(role_name)
+                  routing.halt 400, { message: 'Unknown role' }.to_json unless %w[admin member].include?(role_name)
                   role = Role.first(name: role_name)
                   routing.halt 404, { message: 'Role not assigned' }.to_json unless role && target.system_roles.include?(role)
 
@@ -288,6 +290,51 @@ module FinanceTracker
                 end
               end
 
+            end
+          end
+        end
+
+        # One-way friend list for the authenticated account. Friends are just a
+        # convenient source of usernames for bill splits; the relationship is
+        # personal, so every route resolves the owner from the auth token.
+        routing.on 'friends' do
+          routing.is do
+            current_account = current_account_from_auth
+            routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+
+            # GET api/v1/friends -- list the account's saved friends
+            routing.get do
+              { data: current_account.friends.map { |f| JSON.parse(f.to_json)['data'] } }.to_json
+            end
+
+            # POST api/v1/friends  body: { username }
+            routing.post do
+              scope_allows_write!(routing, 'accounts')
+              username = JSON.parse(routing.body.read)['username']
+              friend = AddFriend.call(account: current_account, username:)
+
+              response.status = 201
+              { message: 'Friend added', data: JSON.parse(friend.to_json)['data'] }.to_json
+            rescue AddFriend::UnknownUserError => e
+              routing.halt 404, { message: e.message }.to_json
+            rescue AddFriend::AlreadyFriendError => e
+              routing.halt 409, { message: e.message }.to_json
+            rescue AddFriend::SelfFriendError => e
+              routing.halt 422, { message: e.message }.to_json
+            end
+          end
+
+          # DELETE api/v1/friends/[username]
+          routing.on String do |friend_username|
+            current_account = current_account_from_auth
+            routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+
+            routing.delete do
+              scope_allows_write!(routing, 'accounts')
+              RemoveFriend.call(account: current_account, username: friend_username)
+              { message: 'Friend removed' }.to_json
+            rescue RemoveFriend::UnknownUserError, RemoveFriend::NotFriendError => e
+              routing.halt 404, { message: e.message }.to_json
             end
           end
         end

@@ -14,7 +14,14 @@ module FinanceTracker
                  left_key: :account_id,
                  right_key: :role_id
     one_to_many :sso_identities
-    plugin :association_dependencies, system_roles: :nullify, sso_identities: :destroy
+    # One-way contact list: the accounts this account has saved as friends.
+    # Directional and not auto-reciprocal (see migration 014).
+    many_to_many :friends,
+                 class: :'FinanceTracker::Account',
+                 join_table: :friendships,
+                 left_key: :account_id,
+                 right_key: :friend_id
+    plugin :association_dependencies, system_roles: :nullify, sso_identities: :destroy, friends: :nullify
 
     plugin :uuid, field: :id
     plugin :timestamps, update_on_create: true
@@ -41,9 +48,8 @@ module FinanceTracker
     end
 
     # Role-predicate shortcuts for controllers and policies.
-    def admin?   = system_roles.any?(&:admin?)
-    def creator? = system_roles.any?(&:creator?)
-    def member?  = system_roles.any?(&:member?)
+    def admin?  = system_roles.any?(&:admin?)
+    def member? = system_roles.any?(&:member?)
 
     # System-level capabilities for this account.
     # Delegates to AccountPolicy so the rules stay in one place.
