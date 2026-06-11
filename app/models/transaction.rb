@@ -65,7 +65,11 @@ module FinanceTracker
               title:,
               amount:,
               transaction_date:,
-              note:
+              note:,
+              wallet_id:,
+              wallet_name: wallet&.name,
+              category_id:,
+              category_name: category&.name
             }
           }
         }, options

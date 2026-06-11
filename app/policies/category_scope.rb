@@ -9,7 +9,7 @@ module FinanceTracker
     def viewable
       return Category.where(Sequel.lit('1 = 0')) unless @account
 
-      Category.all
+      Category.dataset
     end
   end
 end

@@ -17,7 +17,7 @@ module FinanceTracker
     end
 
     def can_edit?
-      can_write? && AccountPolicy.new(@account).is_admin?
+      can_write? && !@account.nil? && !@category&.is_default
     end
 
     def can_delete?
@@ -33,7 +33,7 @@ module FinanceTracker
     end
 
     def index_summary
-      { can_view: can_view?, can_edit: can_edit? }
+      { can_view: can_view?, can_edit: can_edit?, can_delete: can_delete? }
     end
 
     private

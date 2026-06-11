@@ -14,7 +14,7 @@ module FinanceTracker
     plugin :uuid, field: :id
     plugin :timestamps
     plugin :whitelist_security
-    set_allowed_columns :account_id, :name
+    set_allowed_columns :account_id, :name, :method_type
 
     class << self
       def create(values = nil, &block)
@@ -67,6 +67,7 @@ module FinanceTracker
             attributes: {
               id:,
               name:,
+              method_type:,
               account_number:,
               balance:
             }

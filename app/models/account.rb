@@ -13,7 +13,15 @@ module FinanceTracker
                  join_table: :accounts_roles,
                  left_key: :account_id,
                  right_key: :role_id
-    plugin :association_dependencies, system_roles: :nullify
+    one_to_many :sso_identities
+    # One-way contact list: the accounts this account has saved as friends.
+    # Directional and not auto-reciprocal (see migration 014).
+    many_to_many :friends,
+                 class: :'FinanceTracker::Account',
+                 join_table: :friendships,
+                 left_key: :account_id,
+                 right_key: :friend_id
+    plugin :association_dependencies, system_roles: :nullify, sso_identities: :destroy, friends: :nullify
 
     plugin :uuid, field: :id
     plugin :timestamps, update_on_create: true
@@ -30,6 +38,17 @@ module FinanceTracker
       self.email_hash   = SecureDB.hash(plaintext)
     end
 
+    # Home-banner cover photo (base64), stored encrypted like payment proofs.
+    def banner_image
+      banner_image_secure.nil? ? nil : SecureDB.decrypt(banner_image_secure)
+    end
+
+    def banner_image=(base64)
+      self.banner_image_secure = base64.to_s.empty? ? nil : SecureDB.encrypt(base64)
+    end
+
+    def banner? = !banner_image_secure.nil?
+
     def password=(new_password)
       self.password_digest = Password.digest(new_password).to_s
     end
@@ -38,6 +57,10 @@ module FinanceTracker
       digest = Password.from_digest(password_digest)
       digest.correct?(try_password)
     end
+
+    # Role-predicate shortcuts for controllers and policies.
+    def admin?  = system_roles.any?(&:admin?)
+    def member? = system_roles.any?(&:member?)
 
     # System-level capabilities for this account.
     # Delegates to AccountPolicy so the rules stay in one place.

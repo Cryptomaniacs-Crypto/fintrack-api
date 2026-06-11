@@ -6,20 +6,37 @@ require 'json'
 require_relative '../../config/environments'
 require_relative 'http_request'
 require_relative '../lib/auth_scope'
+require_relative '../lib/google_id_token'
 require_relative '../models/transaction'
 require_relative '../models/wallet'
 require_relative '../models/category'
 require_relative '../models/account'
+require_relative '../models/google_account'
 require_relative '../models/role'
 require_relative '../models/authorized_account'
+require_relative '../models/sso_identity'
+require_relative '../models/bill_split'
+require_relative '../models/bill_split_participant'
+require_relative '../models/bill_split_item'
 require_relative '../services/get_account_by_username'
 require_relative '../services/find_account_by_email'
 require_relative '../services/create_account'
+require_relative '../services/update_account_username'
 require_relative '../services/authenticate_account'
+require_relative '../services/authenticate_sso'
 require_relative '../services/authorize_account'
+require_relative '../services/find_or_create_sso_account'
 require_relative '../services/verify_registration'
 require_relative '../services/assign_role_to_account'
 require_relative '../services/list_account_roles'
+require_relative '../services/add_friend'
+require_relative '../services/remove_friend'
+require_relative '../services/create_bill_split'
+require_relative '../services/update_bill_split'
+require_relative '../services/send_bill_split'
+require_relative '../services/notify_bill_split'
+require_relative '../services/pay_bill_split_share'
+require_relative '../services/confirm_bill_split_payment'
 require_relative '../policies/account_policy'
 require_relative '../policies/account_scope'
 require_relative '../policies/category_policy'
@@ -34,6 +51,10 @@ module FinanceTracker
   # Web controller for Finance Tracker API
   class Api < Roda
     plugin :halt
+    # Enables routing.patch / routing.delete / routing.put (Roda core only
+    # ships get/post). Required by the transaction, role, and bill-split
+    # mutation routes below.
+    plugin :all_verbs
 
     route do |routing|
       response['Content-Type'] = 'application/json'
@@ -57,12 +78,19 @@ module FinanceTracker
       @api_root = 'api/v1'
       routing.on @api_root do
         routing.on 'auth' do
+          # Every auth POST carries no auth_token, so it must be signed by the
+          # app. Verify once here; @request_data is the verified inner body.
+          begin
+            @request_data = HttpRequest.new(routing).signed_body_data
+          rescue SignedRequest::VerificationError
+            routing.halt 403, { message: 'Must sign request' }.to_json
+          end
+
           # POST api/v1/auth/authentication
           routing.post 'authentication' do
-            credentials = JSON.parse(routing.body.read)
             account = AuthenticateAccount.call(
-              username: credentials['username'],
-              password: credentials['password']
+              username: @request_data[:username],
+              password: @request_data[:password]
             )
 
             roles = account.system_roles.map { |role| { id: role.id, name: role.name } }
@@ -73,11 +101,11 @@ module FinanceTracker
             envelope['capabilities'] = policy.capabilities
             # Login issues a FULL-scope session token (write implies read).
             envelope['auth_token'] = AuthorizedAccount.new(envelope, AuthScope.new, account_id: account.id).token
+            # Also mint a READ_ONLY API key the app can forward on behalf of the user.
+            envelope['account_api_token'] = AuthorizedAccount.new(envelope, AuthScope::READ_ONLY, account_id: account.id).token
             JSON.generate(envelope)
           rescue AuthenticateAccount::UnauthorizedError => e
             routing.halt 401, { message: e.message }.to_json
-          rescue JSON::ParserError
-            routing.halt 400, { message: 'Invalid JSON body' }.to_json
           rescue StandardError => e
             Api.logger.error "UNKNOWN ERROR: #{e.message}"
             routing.halt 500, { message: 'Unknown server error' }.to_json
@@ -85,8 +113,7 @@ module FinanceTracker
 
           # POST api/v1/auth/register
           routing.post 'register' do
-            registration = JSON.parse(routing.body.read)
-            VerifyRegistration.new(registration).call
+            VerifyRegistration.new(@request_data).call
             response.status = 202
             { message: 'Verification email sent' }.to_json
           rescue VerifyRegistration::InvalidRegistration => e
@@ -94,11 +121,25 @@ module FinanceTracker
           rescue VerifyRegistration::EmailProviderError => e
             Api.logger.error("Registration email failed: #{e.message}")
             routing.halt 500, { message: 'Could not send verification email' }.to_json
-          rescue JSON::ParserError
-            routing.halt 400, { message: 'Invalid JSON body' }.to_json
           rescue StandardError => e
             Api.logger.error "UNKNOWN ERROR: #{e.message}"
             routing.halt 500, { message: 'Unknown server error' }.to_json
+          end
+
+          # POST api/v1/auth/sso
+          routing.post 'sso' do
+            id_token = @request_data[:id_token]
+            routing.halt(400, { message: 'Missing id_token' }.to_json) if id_token.to_s.empty?
+
+            JSON.generate(AuthenticateSso.call(id_token))
+          rescue OidcVerifier::VerificationError => e
+            Api.logger.warn("SSO verification failed: #{e.message}")
+            routing.halt 401, { message: 'Invalid SSO credentials' }.to_json
+          rescue FindOrCreateSsoAccount::EmailConflictError
+            routing.halt 409, { message: 'Email already registered to another account' }.to_json
+          rescue StandardError => e
+            Api.logger.error("SSO ERROR: #{e.message}")
+            routing.halt 400, { message: 'SSO authentication failed' }.to_json
           end
         end
 
@@ -106,13 +147,37 @@ module FinanceTracker
           @account_route = "#{@api_root}/accounts"
 
           routing.is do
-            # GET api/v1/accounts?email=... (search by email via HMAC hash)
             routing.get do
               email = routing.params['email']
-              routing.halt 400, { message: 'email query param required' }.to_json unless email
 
-              account = FindAccountByEmail.call(email:)
-              account ? account.to_json : routing.halt(404, { message: 'Account not found' }.to_json)
+              if email
+                # GET api/v1/accounts?email=... (search by email via HMAC hash)
+                account = FindAccountByEmail.call(email:)
+                next(account ? account.to_json : routing.halt(404, { message: 'Account not found' }.to_json))
+              end
+
+              # GET api/v1/accounts  (admin-only index)
+              current_account = current_account_from_auth
+              routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+              routing.halt 403, { message: 'Admins only' }.to_json unless
+                ::FinanceTracker::AccountPolicy.new(current_account, current_account, auth_scope: auth_scope).is_admin?
+
+              role_filter = routing.params['role']
+              sort = routing.params['sort']
+
+              accounts = Account.all
+              accounts = accounts.select { |a| a.system_roles.map(&:name).include?(role_filter) } if role_filter && role_filter != 'none'
+              accounts = accounts.select { |a| a.system_roles.empty? } if role_filter == 'none'
+              accounts = accounts.sort_by { |a| a.system_roles.map(&:name).min || 'zzz' } if sort == 'role'
+              accounts = accounts.sort_by(&:username) if sort == 'username'
+
+              {
+                data: accounts.map do |a|
+                  entry = JSON.parse(a.to_json)
+                  entry['included'] = { 'system_roles' => a.system_roles.map { |r| { 'id' => r.id, 'name' => r.name } } }
+                  entry
+                end
+              }.to_json
             rescue StandardError => e
               Api.logger.error "UNKNOWN ERROR: #{e.message}"
               routing.halt 500, { message: 'Unknown server error' }.to_json
@@ -143,12 +208,75 @@ module FinanceTracker
             # receives a limited-scope (READ_ONLY) auth_token to use as an API key.
             routing.is do
               routing.get do
-                envelope = AuthorizeAccount.call(auth: @auth, username:)
+                envelope = AuthorizeAccount.call(auth: @auth, username:,
+                                                 requested_scope: routing.params['scope'])
                 envelope.to_json
               rescue GetAccountByUsername::AccountNotFoundError => e
                 routing.halt 404, { message: e.message }.to_json
               rescue AuthorizeAccount::ForbiddenError
                 routing.halt 404, { message: 'Account not found' }.to_json
+              end
+
+              # PUT api/v1/accounts/[username] -- owner renames their handle.
+              routing.put do
+                current_account = current_account_from_auth
+                routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+                scope_allows_write!(routing, 'accounts')
+
+                target = Account.first(username:)
+                routing.halt 404, { message: 'Account not found' }.to_json unless target
+                routing.halt 403, { message: 'Not allowed' }.to_json unless
+                  ::FinanceTracker::AccountPolicy.new(current_account, target, auth_scope: auth_scope).can_edit?
+
+                new_username = HttpRequest.new(routing).body_data[:username]
+                UpdateAccountUsername.call(account: target, new_username:).to_json
+              rescue UpdateAccountUsername::InvalidUsernameError => e
+                routing.halt 400, { message: e.message }.to_json
+              rescue UpdateAccountUsername::UsernameTakenError => e
+                routing.halt 409, { message: e.message }.to_json
+              rescue StandardError => e
+                Api.logger.error "USERNAME UPDATE ERROR: #{e.message}"
+                routing.halt 500, { message: 'Unknown server error' }.to_json
+              end
+            end
+
+            # /api/v1/accounts/[username]/banner -- per-user home cover photo
+            routing.on 'banner' do
+              current_account = current_account_from_auth
+              routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+              target = Account.first(username:)
+              routing.halt 404, { message: 'Account not found' }.to_json unless target
+              policy = ::FinanceTracker::AccountPolicy.new(current_account, target, auth_scope: auth_scope)
+
+              # GET -- owner/admin fetches the cover image (base64 + type)
+              routing.get do
+                routing.halt 403, { message: 'Not allowed' }.to_json unless policy.can_view?
+                routing.halt 404, { message: 'No banner' }.to_json unless target.banner?
+                { image_base64: target.banner_image, content_type: target.banner_content_type }.to_json
+              end
+
+              # PUT -- owner uploads/replaces the cover image
+              routing.put do
+                routing.halt 403, { message: 'Not allowed' }.to_json unless policy.can_edit?
+                scope_allows_write!(routing, 'accounts')
+                data = HttpRequest.new(routing).body_data
+                type = ::FinanceTracker::ImageProof.validate!(data[:image_base64], data[:content_type])
+                target.banner_image = data[:image_base64]
+                target.banner_content_type = type
+                target.save_changes
+                { message: 'Banner updated' }.to_json
+              rescue ::FinanceTracker::ImageProof::InvalidImage => e
+                routing.halt 400, { message: e.message }.to_json
+              end
+
+              # DELETE -- owner removes the cover image
+              routing.delete do
+                routing.halt 403, { message: 'Not allowed' }.to_json unless policy.can_edit?
+                scope_allows_write!(routing, 'accounts')
+                target.banner_image = nil
+                target.banner_content_type = nil
+                target.save_changes
+                { message: 'Banner removed' }.to_json
               end
             end
 
@@ -158,11 +286,10 @@ module FinanceTracker
               # GET api/v1/accounts/[username]/roles
               routing.get do
                 current_account = current_account_from_auth
+                routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
                 target = Account.first(username:)
-                if current_account
-                  routing.halt 403, { message: 'Only admins can manage system roles' }.to_json unless
-                    ::FinanceTracker::SystemRolePolicy.new(current_account, target, auth_scope: auth_scope).can_manage?
-                end
+                routing.halt 403, { message: 'Only admins can manage system roles' }.to_json unless
+                  ::FinanceTracker::SystemRolePolicy.new(current_account, target, auth_scope: auth_scope).can_manage?
 
                 roles = ListAccountRoles.call(username:).map { |role| { id: role.id, name: role.name } }
                 output = { data: roles }
@@ -171,60 +298,141 @@ module FinanceTracker
                 routing.halt 404, { message: e.message }.to_json
               end
 
-              # POST api/v1/accounts/[username]/roles/[role_name]
-              routing.post String do |role_name|
+              routing.on String do |role_name|
                 current_account = current_account_from_auth
                 target = Account.first(username:)
-                if current_account
-                  routing.halt(403, { message: 'Only admins can manage system roles' }.to_json) unless
-                    ::FinanceTracker::SystemRolePolicy.new(current_account, target, auth_scope: auth_scope).can_manage?
+                routing.halt 404, { message: 'Account not found' }.to_json unless target
+                routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+                routing.halt(403, { message: 'Only admins can manage system roles' }.to_json) unless
+                  ::FinanceTracker::SystemRolePolicy.new(current_account, target, auth_scope: auth_scope).can_manage?
+
+                # POST api/v1/accounts/[username]/roles/[role_name]
+                routing.post do
+                  assigned_role = AssignRoleToAccount.call(username:, role_name:)
+                  response.status = 201
+                  response['Location'] = "#{@account_roles_route}/#{assigned_role.name}"
+                  assigned_role.to_json
+                rescue AssignRoleToAccount::AccountNotFoundError,
+                       AssignRoleToAccount::RoleNotFoundError => e
+                  routing.halt 404, { message: e.message }.to_json
+                rescue AssignRoleToAccount::RoleAlreadyAssignedError => e
+                  routing.halt 409, { message: e.message }.to_json
                 end
 
-                assigned_role = AssignRoleToAccount.call(username:, role_name:)
+                # DELETE api/v1/accounts/[username]/roles/[role_name]
+                routing.delete do
+                  routing.halt 400, { message: 'Unknown role' }.to_json unless %w[admin member].include?(role_name)
+                  role = Role.first(name: role_name)
+                  routing.halt 404, { message: 'Role not assigned' }.to_json unless role && target.system_roles.include?(role)
 
-                response.status = 201
-                response['Location'] = "#{@account_roles_route}/#{assigned_role.name}"
-                assigned_role.to_json
-              rescue AssignRoleToAccount::AccountNotFoundError,
-                     AssignRoleToAccount::RoleNotFoundError => e
-                routing.halt 404, { message: e.message }.to_json
-              rescue AssignRoleToAccount::RoleAlreadyAssignedError => e
-                routing.halt 409, { message: e.message }.to_json
+                  target.remove_system_role(role)
+                  { message: 'System role revoked', data: JSON.parse(target.to_json) }.to_json
+                end
               end
 
             end
           end
         end
 
+        # One-way friend list for the authenticated account. Friends are just a
+        # convenient source of usernames for bill splits; the relationship is
+        # personal, so every route resolves the owner from the auth token.
+        routing.on 'friends' do
+          routing.is do
+            current_account = current_account_from_auth
+            routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+
+            # GET api/v1/friends -- list the account's saved friends
+            routing.get do
+              { data: current_account.friends.map { |f| JSON.parse(f.to_json)['data'] } }.to_json
+            end
+
+            # POST api/v1/friends  body: { username }
+            routing.post do
+              scope_allows_write!(routing, 'accounts')
+              username = JSON.parse(routing.body.read)['username']
+              friend = AddFriend.call(account: current_account, username:)
+
+              response.status = 201
+              { message: 'Friend added', data: JSON.parse(friend.to_json)['data'] }.to_json
+            rescue AddFriend::UnknownUserError => e
+              routing.halt 404, { message: e.message }.to_json
+            rescue AddFriend::AlreadyFriendError => e
+              routing.halt 409, { message: e.message }.to_json
+            rescue AddFriend::SelfFriendError => e
+              routing.halt 422, { message: e.message }.to_json
+            end
+          end
+
+          # DELETE api/v1/friends/[username]
+          routing.on String do |friend_username|
+            current_account = current_account_from_auth
+            routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+
+            routing.delete do
+              scope_allows_write!(routing, 'accounts')
+              RemoveFriend.call(account: current_account, username: friend_username)
+              { message: 'Friend removed' }.to_json
+            rescue RemoveFriend::UnknownUserError, RemoveFriend::NotFriendError => e
+              routing.halt 404, { message: e.message }.to_json
+            end
+          end
+        end
+
         routing.on 'wallets' do
           @wallet_route = "#{@api_root}/wallets"
+          routing.halt 401, { message: 'Authentication required' }.to_json unless current_account_from_auth
 
-          # GET api/v1/wallets/[wallet_id]
-          routing.get String do |wallet_id|
-            wallet = Wallet.first(id: wallet_id)
-            current_account = current_account_from_auth
-            if current_account
+          routing.on String do |wallet_id|
+            # GET api/v1/wallets/[wallet_id]
+            routing.get do
+              wallet = Wallet.first(id: wallet_id)
+              current_account = current_account_from_auth
               routing.halt(404, { message: 'Wallet not found' }.to_json) unless ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).can_view?
+
+              envelope = JSON.parse(wallet.to_json)
+              envelope['policies'] = ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).summary
+              envelope.to_json
+            rescue StandardError => e
+              routing.halt 404, { message: e.message }.to_json
             end
 
-            if wallet
+            # PATCH api/v1/wallets/[wallet_id]
+            routing.patch do
+              data = HttpRequest.new(routing).body_data
+              current_account = current_account_from_auth
+              scope_allows_write!(routing, 'wallets')
+
+              wallet = Wallet.first(id: wallet_id)
+              routing.halt 404, { message: 'Wallet not found' }.to_json unless wallet
+
+              policy = ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope)
+              routing.halt 403, { message: 'Not authorized' }.to_json unless policy.can_edit?
+
+              name_val = data['name'] || data[:name]
+              wallet.update(name: name_val.to_s.strip) if name_val.to_s.strip.length.positive?
+
+              an = data.key?('account_number') ? data['account_number'] : data[:account_number]
+              unless an.nil?
+                wallet.account_number = an.to_s
+                wallet.save_changes
+              end
+
               envelope = JSON.parse(wallet.to_json)
-              envelope['policies'] = ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).summary if current_account
-              envelope.to_json
-            else
-              raise('Wallet not found')
+              { message: 'Wallet updated', data: envelope }.to_json
+            rescue StandardError => e
+              Api.logger.error "PATCH WALLET ERROR: #{e.message}"
+              routing.halt 500, { message: e.message }.to_json
             end
-          rescue StandardError => e
-            routing.halt 404, { message: e.message }.to_json
           end
 
           # GET api/v1/wallets
           routing.get do
             current_account = current_account_from_auth
-            wallets = current_account ? ::FinanceTracker::WalletScope.new(current_account).viewable.all : Wallet.all
+            wallets = ::FinanceTracker::WalletScope.new(current_account).viewable.all
             payload = wallets.map do |wallet|
               envelope = JSON.parse(wallet.to_json)
-              envelope['policies'] = ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).index_summary if current_account
+              envelope['policies'] = ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).index_summary
               envelope
             end
             { data: payload }.to_json
@@ -257,33 +465,68 @@ module FinanceTracker
 
         routing.on 'categories' do
           @category_route = "#{@api_root}/categories"
+          routing.halt 401, { message: 'Authentication required' }.to_json unless current_account_from_auth
 
-          # GET api/v1/categories/[category_id]
-          routing.get String do |category_id|
-            category = Category.first(id: category_id)
-            current_account = current_account_from_auth
-            if current_account
+          routing.on String do |category_id|
+            # GET api/v1/categories/[category_id]
+            routing.get do
+              category = Category.first(id: category_id)
+              current_account = current_account_from_auth
+              routing.halt(404, { message: 'Category not found' }.to_json) unless category
               routing.halt(404, { message: 'Category not found' }.to_json) unless ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).can_view?
+
+              envelope = JSON.parse(category.to_json)
+              envelope['policies'] = ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).summary
+              envelope.to_json
+            rescue StandardError => e
+              routing.halt 404, { message: e.message }.to_json
             end
 
-            if category
+            # PATCH api/v1/categories/[category_id]
+            routing.patch do
+              data = HttpRequest.new(routing).body_data
+              current_account = current_account_from_auth
+              scope_allows_write!(routing, 'categories')
+
+              category = Category.first(id: category_id)
+              routing.halt 404, { message: 'Category not found' }.to_json unless category
+              routing.halt 403, { message: 'Not authorized' }.to_json unless ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).can_edit?
+
+              safe = data.slice('name', 'description').transform_keys(&:to_sym)
+              category.update(safe) unless safe.empty?
+
               envelope = JSON.parse(category.to_json)
-              envelope['policies'] = ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).summary if current_account
-              envelope.to_json
-            else
-              raise('Category not found')
+              { message: 'Category updated', data: envelope }.to_json
+            rescue StandardError => e
+              Api.logger.error "PATCH CATEGORY ERROR: #{e.message}"
+              routing.halt 500, { message: e.message }.to_json
             end
-          rescue StandardError => e
-            routing.halt 404, { message: e.message }.to_json
+
+            # DELETE api/v1/categories/[category_id]
+            routing.delete do
+              current_account = current_account_from_auth
+              scope_allows_write!(routing, 'categories')
+
+              category = Category.first(id: category_id)
+              routing.halt 404, { message: 'Category not found' }.to_json unless category
+              routing.halt 403, { message: 'Not authorized' }.to_json unless ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).can_delete?
+
+              category.destroy
+              response.status = 204
+              nil
+            rescue StandardError => e
+              Api.logger.error "DELETE CATEGORY ERROR: #{e.message}"
+              routing.halt 500, { message: e.message }.to_json
+            end
           end
 
           # GET api/v1/categories
           routing.get do
             current_account = current_account_from_auth
-            categories = current_account ? ::FinanceTracker::CategoryScope.new(current_account).viewable.all : Category.all
+            categories = ::FinanceTracker::CategoryScope.new(current_account).viewable.all
             payload = categories.map do |category|
               envelope = JSON.parse(category.to_json)
-              envelope['policies'] = ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).index_summary if current_account
+              envelope['policies'] = ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).index_summary
               envelope
             end
             { data: payload }.to_json
@@ -316,6 +559,7 @@ module FinanceTracker
 
         routing.on 'transactions' do
           @transaction_route = "#{@api_root}/transactions"
+          routing.halt 401, { message: 'Authentication required' }.to_json unless current_account_from_auth
 
           routing.on String do |transaction_id|
             routing.on 'wallet' do
@@ -324,7 +568,7 @@ module FinanceTracker
                 transaction = Transaction.first(id: transaction_id)
                 wallet = transaction&.wallet
                 current_account = current_account_from_auth
-                if current_account && wallet
+                if wallet
                   routing.halt(404, { message: 'Wallet not found' }.to_json) unless ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).can_view?
                 end
                 wallet ? wallet.to_json : raise('Wallet not found')
@@ -339,7 +583,7 @@ module FinanceTracker
                 transaction = Transaction.first(id: transaction_id)
                 category = transaction&.category
                 current_account = current_account_from_auth
-                if current_account && category
+                if category
                   routing.halt(404, { message: 'Category not found' }.to_json) unless ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).can_view?
                 end
                 category ? category.to_json : raise('Category not found')
@@ -357,7 +601,7 @@ module FinanceTracker
                 wallet = transaction&.wallet
                 wallet = nil unless wallet&.id.to_s == wallet_id.to_s
                 current_account = current_account_from_auth
-                if current_account && wallet
+                if wallet
                   routing.halt(404, { message: 'Wallet not found' }.to_json) unless ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).can_view?
                 end
                 wallet ? wallet.to_json : raise('Wallet not found')
@@ -372,7 +616,7 @@ module FinanceTracker
 
                 current_account = current_account_from_auth
                 wallet = transaction.wallet
-                if current_account && wallet
+                if wallet
                   routing.halt(404, { message: 'Wallet not found' }.to_json) unless ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope).can_view?
                 end
 
@@ -417,7 +661,7 @@ module FinanceTracker
                 category = transaction&.category
                 category = nil unless category&.id.to_s == category_id.to_s
                 current_account = current_account_from_auth
-                if current_account && category
+                if category
                   routing.halt(404, { message: 'Category not found' }.to_json) unless ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).can_view?
                 end
                 category ? category.to_json : raise('Category not found')
@@ -432,7 +676,7 @@ module FinanceTracker
 
                 current_account = current_account_from_auth
                 category = transaction.category
-                if current_account && category
+                if category
                   routing.halt(404, { message: 'Category not found' }.to_json) unless ::FinanceTracker::CategoryPolicy.new(current_account, category, auth_scope: auth_scope).can_view?
                 end
 
@@ -470,28 +714,76 @@ module FinanceTracker
             routing.get do
               transaction = Transaction.first(id: transaction_id)
               current_account = current_account_from_auth
-              if current_account && transaction
-                routing.halt(404, { message: 'Transaction not found' }.to_json) unless ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope).can_view?
-              end
-              if transaction
-                envelope = JSON.parse(transaction.to_json)
-                envelope['policies'] = ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope).summary if current_account
-                envelope.to_json
-              else
-                raise('Transaction not found')
-              end
+              routing.halt(404, { message: 'Transaction not found' }.to_json) unless transaction
+              routing.halt(404, { message: 'Transaction not found' }.to_json) unless ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope).can_view?
+
+              envelope = JSON.parse(transaction.to_json)
+              envelope['policies'] = ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope).summary
+              envelope.to_json
             rescue StandardError => e
               routing.halt 404, { message: e.message }.to_json
             end
+
+            # PATCH api/v1/transactions/[transaction_id]
+            routing.patch do
+              data = HttpRequest.new(routing).body_data
+              current_account = current_account_from_auth
+              scope_allows_write!(routing, 'transactions')
+
+              transaction = Transaction.first(id: transaction_id)
+              routing.halt 404, { message: 'Transaction not found' }.to_json unless transaction
+
+              policy = ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope)
+              routing.halt 403, { message: 'Not authorized' }.to_json unless policy.can_edit?
+
+              amount_val = data.delete('amount') || data.delete(:amount)
+              safe = data.slice('title', 'transaction_date', 'note', 'category_id')
+                        .transform_keys(&:to_sym)
+              transaction.update(safe) unless safe.empty?
+
+              if amount_val
+                transaction.amount = amount_val.to_s
+                transaction.save_changes
+              end
+
+              response.status = 200
+              envelope = JSON.parse(transaction.to_json)
+              { message: 'Transaction updated', data: envelope }.to_json
+            rescue StandardError => e
+              Api.logger.error "PATCH TRANSACTION ERROR: #{e.message}"
+              routing.halt 500, { message: e.message }.to_json
+            end
+
+            # DELETE api/v1/transactions/[transaction_id]
+            routing.delete do
+              current_account = current_account_from_auth
+              scope_allows_write!(routing, 'transactions')
+
+              transaction = Transaction.first(id: transaction_id)
+              routing.halt 404, { message: 'Transaction not found' }.to_json unless transaction
+
+              policy = ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope)
+              routing.halt 403, { message: 'Not authorized' }.to_json unless policy.can_delete?
+
+              transaction.destroy
+              response.status = 204
+              nil
+            rescue StandardError => e
+              Api.logger.error "DELETE TRANSACTION ERROR: #{e.message}"
+              routing.halt 500, { message: e.message }.to_json
+            end
           end
 
-          # GET api/v1/transactions
+          # GET api/v1/transactions[?wallet_id=]
           routing.get do
             current_account = current_account_from_auth
-            transactions = current_account ? ::FinanceTracker::TransactionScope.new(current_account).viewable.all : Transaction.all
+            scope = ::FinanceTracker::TransactionScope.new(current_account).viewable
+            wallet_id = routing.params['wallet_id']
+            scope = scope.where(wallet_id: wallet_id) if wallet_id
+            transactions = scope.order(Sequel.desc(:transaction_date)).all
             payload = transactions.map do |transaction|
               envelope = JSON.parse(transaction.to_json)
-              envelope['policies'] = ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope).index_summary if current_account
+              envelope['policies'] = ::FinanceTracker::TransactionPolicy.new(current_account, transaction, auth_scope: auth_scope).index_summary
               envelope
             end
             output = { data: payload }
@@ -534,6 +826,193 @@ module FinanceTracker
           end
 
         end
+
+        routing.on 'bill-splits' do
+          current_account = current_account_from_auth
+          routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+
+          routing.is do
+            # GET api/v1/bill-splits — splits where current account is creator or participant
+            routing.get do
+              created = BillSplit.where(creator_id: current_account.id).all
+              shared_ids = BillSplitParticipant.where(account_id: current_account.id).select_map(:bill_split_id)
+              shared = shared_ids.empty? ? [] : BillSplit.where(id: shared_ids).all
+              bills = (created + shared).uniq(&:id).sort_by { |bill| bill.created_at.to_s }.reverse
+              { data: bills.map(&:to_h) }.to_json
+            rescue StandardError => e
+              Api.logger.error "UNKNOWN ERROR: #{e.message}"
+              routing.halt 500, { message: 'Unknown server error' }.to_json
+            end
+
+            # POST api/v1/bill-splits — create a draft (creator + named participants)
+            routing.post do
+              scope_allows_write!(routing, 'transactions')
+              payload = HttpRequest.new(routing).body_data
+
+              bill = CreateBillSplit.call(
+                creator: current_account,
+                title: payload[:title] || payload['title'],
+                participant_usernames: payload[:participant_usernames] || payload['participant_usernames'],
+                note: payload[:note] || payload['note']
+              )
+
+              response.status = 201
+              response['Location'] = "#{@api_root}/bill-splits/#{bill.id}"
+              bill.to_json
+            rescue CreateBillSplit::UnknownParticipant => e
+              routing.halt 404, { message: e.message }.to_json
+            rescue CreateBillSplit::InvalidInput => e
+              routing.halt 400, { message: e.message }.to_json
+            rescue JSON::ParserError
+              routing.halt 400, { message: 'Invalid JSON body' }.to_json
+            rescue StandardError => e
+              Api.logger.error "UNKNOWN ERROR: #{e.message}"
+              routing.halt 500, { message: 'Unknown server error' }.to_json
+            end
+          end
+
+          routing.on String do |split_id|
+            bill = BillSplit.first(id: split_id)
+            routing.halt 404, { message: 'Bill split not found' }.to_json unless bill
+            routing.halt 403, { message: 'Not authorized to access this bill split' }.to_json unless bill.participant?(current_account)
+
+            routing.is do
+              # GET api/v1/bill-splits/[id] — detail + per-person breakdown
+              routing.get do
+                bill.to_json
+              end
+
+              # PATCH api/v1/bill-splits/[id] — creator edits dishes/tax/service while editable
+              routing.patch do
+                scope_allows_write!(routing, 'transactions')
+                routing.halt 403, { message: 'Only the creator can edit a bill split' }.to_json unless bill.creator?(current_account)
+
+                payload = HttpRequest.new(routing).body_data
+                updated = UpdateBillSplit.call(
+                  bill_split: bill,
+                  title: payload[:title] || payload['title'],
+                  tax_percent: payload[:tax_percent] || payload['tax_percent'],
+                  service_percent: payload[:service_percent] || payload['service_percent'],
+                  note: payload[:note] || payload['note'],
+                  items: payload[:items] || payload['items'],
+                  category_id: payload[:category_id] || payload['category_id']
+                )
+                updated.to_json
+              rescue UpdateBillSplit::NotEditable => e
+                routing.halt 409, { message: e.message }.to_json
+              rescue UpdateBillSplit::InvalidInput => e
+                routing.halt 400, { message: e.message }.to_json
+              end
+
+              # DELETE api/v1/bill-splits/[id] — creator may delete while not settled
+              routing.delete do
+                scope_allows_write!(routing, 'transactions')
+                routing.halt 403, { message: 'Only the creator can delete a bill split' }.to_json unless bill.creator?(current_account)
+                routing.halt 409, { message: 'Settled records cannot be deleted' }.to_json if bill.settled?
+
+                bill.destroy
+                { message: 'Bill split deleted' }.to_json
+              end
+            end
+
+            # POST api/v1/bill-splits/[id]/send — owner sends; optional wallet_id
+            # records the owner's upfront expense for the grand total.
+            routing.post 'send' do
+              scope_allows_write!(routing, 'transactions')
+              routing.halt 403, { message: 'Only the creator can send a bill split' }.to_json unless bill.creator?(current_account)
+
+              payload = HttpRequest.new(routing).body_data
+              SendBillSplit.call(bill:, owner: current_account, wallet_id: payload[:wallet_id] || payload['wallet_id'])
+              bill.reload
+              NotifyBillSplit.call(bill: bill, app_url: ENV.fetch('APP_URL', nil))
+              bill.to_json
+            rescue SendBillSplit::InvalidInput => e
+              routing.halt 400, { message: e.message }.to_json
+            end
+
+            # POST api/v1/bill-splits/[id]/agree — a participant agrees to their share
+            routing.post 'agree' do
+              scope_allows_write!(routing, 'transactions')
+              participant = bill.participant_for(current_account)
+              routing.halt 403, { message: 'Only a participant can agree' }.to_json unless participant
+              routing.halt 409, { message: 'Cannot change a paid or settled share' }.to_json if participant.paid? || participant.settled?
+
+              participant.agree!
+              bill.reload.to_json
+            rescue StandardError => e
+              routing.halt 400, { message: e.message }.to_json
+            end
+
+            # POST api/v1/bill-splits/[id]/reject — a participant rejects with a note
+            routing.post 'reject' do
+              scope_allows_write!(routing, 'transactions')
+              participant = bill.participant_for(current_account)
+              routing.halt 403, { message: 'Only a participant can reject' }.to_json unless participant
+              routing.halt 409, { message: 'Cannot reject a paid or settled share' }.to_json if participant.paid? || participant.settled?
+
+              payload = HttpRequest.new(routing).body_data
+              reason = (payload[:reason] || payload['reason']).to_s.strip
+              routing.halt 400, { message: 'Reject reason is required' }.to_json if reason.empty?
+
+              participant.reject!(reason)
+              bill.mark_disputed!
+              bill.reload.to_json
+            rescue StandardError => e
+              routing.halt 400, { message: e.message }.to_json
+            end
+
+            # POST api/v1/bill-splits/[id]/pay — a participant records payment from
+            # one of their wallets, optionally attaching a proof image.
+            routing.post 'pay' do
+              scope_allows_write!(routing, 'transactions')
+              payload = HttpRequest.new(routing).body_data
+              PayBillSplitShare.call(
+                bill:,
+                payer: current_account,
+                wallet_id: payload[:wallet_id] || payload['wallet_id'],
+                proof_base64: payload[:proof_base64] || payload['proof_base64'],
+                proof_content_type: payload[:proof_content_type] || payload['proof_content_type']
+              )
+              bill.reload.to_json
+            rescue PayBillSplitShare::NotAllowed => e
+              routing.halt 403, { message: e.message }.to_json
+            rescue PayBillSplitShare::InvalidInput => e
+              routing.halt 400, { message: e.message }.to_json
+            end
+
+            routing.on 'participants' do
+              routing.on String do |participant_id|
+                participant = bill.participants.find { |p| p.id == participant_id }
+                routing.halt 404, { message: 'Participant not found' }.to_json unless participant
+
+                # POST .../participants/[pid]/confirm — owner confirms receipt (income)
+                routing.post 'confirm' do
+                  scope_allows_write!(routing, 'transactions')
+                  payload = HttpRequest.new(routing).body_data
+                  ConfirmBillSplitPayment.call(
+                    bill:, owner: current_account, participant:,
+                    wallet_id: payload[:wallet_id] || payload['wallet_id']
+                  )
+                  bill.reload.to_json
+                rescue ConfirmBillSplitPayment::NotAllowed => e
+                  routing.halt 403, { message: e.message }.to_json
+                rescue ConfirmBillSplitPayment::InvalidInput => e
+                  routing.halt 400, { message: e.message }.to_json
+                end
+
+                # GET .../participants/[pid]/proof — owner or that participant only
+                routing.get 'proof' do
+                  unless bill.creator?(current_account) || participant.account_id == current_account.id
+                    routing.halt 403, { message: 'Not authorized to view this proof' }.to_json
+                  end
+                  routing.halt 404, { message: 'No proof uploaded' }.to_json unless participant.proof?
+
+                  { content_type: participant.proof_content_type, image_base64: participant.proof_image }.to_json
+                end
+              end
+            end
+          end
+        end
       end
     end
 
@@ -554,15 +1033,15 @@ module FinanceTracker
       @resolved_auth_scope ||= @auth&.scope || AuthScope.new
     end
 
-    # Enforce the token's write scope on mutating routes. Only applies when a
-    # token is present: anonymous requests keep their existing (open) behavior,
-    # so this narrows authenticated tokens (e.g. a READ_ONLY API key) without
-    # changing the unauthenticated surface.
+    # Enforce authentication and write-scope on mutating routes.
+    # Anonymous requests are rejected with 401; authenticated tokens that lack
+    # write permission for the resource are rejected with 403.
     def scope_allows_write!(routing, resource)
-      return unless @auth
+      routing.halt 401, { message: 'Authentication required' }.to_json unless @auth
       return if auth_scope.can_write?(resource)
 
       routing.halt 403, { message: "Auth token scope does not permit writing #{resource}" }.to_json
     end
+
   end
 end

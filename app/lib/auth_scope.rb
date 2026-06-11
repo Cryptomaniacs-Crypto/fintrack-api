@@ -24,6 +24,9 @@ module FinanceTracker
     SEPARATOR = ' '
     DIVIDER = ':'
 
+    RESOURCES = %w[accounts wallets categories transactions *].freeze
+    PERMISSIONS = %w[read write].freeze
+
     def initialize(scopes = FULL)
       @scopes_str = scopes
       @scopes = {}
@@ -40,6 +43,25 @@ module FinanceTracker
 
     def to_s
       @scopes_str
+    end
+
+    # True when every grant in this scope is satisfiable by parent_scope.
+    # Used to enforce downscope-only token minting: a caller cannot request
+    # a token that exceeds their own current scope.
+    def subset_of?(parent_scope)
+      @scopes.all? do |resource, permissions|
+        permissions.all? do |permission|
+          permission == WRITE ? parent_scope.can_write?(resource) : parent_scope.can_read?(resource)
+        end
+      end
+    end
+
+    # True when every resource and permission token is from the known set.
+    # Rejects arbitrary strings before they reach the subset check.
+    def valid?
+      @scopes.all? do |resource, permissions|
+        RESOURCES.include?(resource) && permissions.all? { |p| PERMISSIONS.include?(p) }
+      end
     end
 
     private

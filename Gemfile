@@ -13,6 +13,7 @@ gem 'roda', '~>3.0'
 gem 'http', '~>5.1'
 
 # Security
+gem 'jwt'
 gem 'rbnacl', '~>7.0'
 
 # Database
