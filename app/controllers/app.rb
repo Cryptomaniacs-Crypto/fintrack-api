@@ -884,7 +884,7 @@ module FinanceTracker
                 bill.to_json_for(current_account)
               end
 
-              # PATCH api/v1/bill-splits/[id] — creator edits dishes/tax/service while editable
+              # PATCH api/v1/bill-splits/[id] — creator edits items/tax/service while editable
               routing.patch do
                 scope_allows_write!(routing, 'transactions')
                 routing.halt 403, { message: 'Only the creator can edit a bill split' }.to_json unless bill.creator?(current_account)

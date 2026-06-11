@@ -5,7 +5,7 @@ require 'json'
 require 'sequel'
 
 module FinanceTracker
-  # A single dish/line on a bill split, shared equally among the participants
+  # A single item/line on a bill split, shared equally among the participants
   # linked through bill_split_item_shares.
   class BillSplitItem < Sequel::Model
     many_to_one :bill_split, class: :'FinanceTracker::BillSplit'
@@ -20,7 +20,7 @@ module FinanceTracker
     plugin :whitelist_security
     set_allowed_columns :bill_split_id, :name, :amount
 
-    # Each sharer owes an equal slice of the dish. Unrounded on purpose:
+    # Each sharer owes an equal slice of the item. Unrounded on purpose:
     # rounding happens once per person in BillSplit#breakdown so cents don't
     # leak away mid-sum.
     def share_amount

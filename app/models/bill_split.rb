@@ -7,7 +7,7 @@ require_relative '../lib/secure_db'
 
 module FinanceTracker
   # An itemized, multi-person bill split owned by `creator`. Holds many
-  # participants and many dishes (items); each dish is split equally among the
+  # participants and many items; each item is split equally among the
   # participants who shared it, then bill-wide tax/service percentages are
   # applied proportionally to each person's subtotal.
   #
@@ -81,10 +81,10 @@ module FinanceTracker
       creator?(account) || !participant_for(account).nil?
     end
 
-    # Send the bill to participants. Requires at least one dish.
+    # Send the bill to participants. Requires at least one item.
     # (Status columns are whitelist-restricted, so set via individual setters.)
     def send!
-      raise 'Add at least one dish before sending' if items.empty?
+      raise 'Add at least one item before sending' if items.empty?
       raise 'Bill split is already settled' if settled?
 
       self.status = 'pending'
