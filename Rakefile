@@ -160,6 +160,133 @@ namespace :db do
       end
     end
   end
+
+  desc 'Erase financial data (transactions, wallets, bill splits) but KEEP ' \
+       'accounts, roles, SSO identities, and default categories'
+  task wipe_data: :load_models do
+    db = FinanceTracker::Api.DB
+    # Child-first deletion order so foreign keys never block a delete.
+    %i[
+      bill_split_item_shares bill_split_items bill_split_participants
+      bill_splits split_agreements transactions wallets
+    ].each do |table|
+      next unless db.tables.include?(table)
+
+      puts "#{table}: #{db[table].delete} rows deleted"
+    end
+
+    if db.tables.include?(:categories)
+      removed = db[:categories].exclude(is_default: true).delete
+      puts "categories (non-default): #{removed} rows deleted"
+    end
+
+    puts "--- kept ---"
+    puts "accounts:           #{db[:accounts].count}"
+    puts "roles:              #{db[:roles].count}" if db.tables.include?(:roles)
+    puts "sso_identities:     #{db[:sso_identities].count}" if db.tables.include?(:sso_identities)
+    puts "default categories: #{db[:categories].where(is_default: true).count}"
+  end
+
+  desc 'Seed realistic demo data (wallets, categories, 6 months of transactions) ' \
+       'for USERNAME=<username>. Safe to re-run; rebuilds the demo wallets each time.'
+  task seed_demo: :load_models do
+    require 'date'
+
+    username = ENV.fetch('USERNAME', '').strip
+    abort 'USERNAME=<username> required' if username.empty?
+    account = FinanceTracker::Account.first(username:)
+    abort "No account found for username '#{username}'" unless account
+
+    rng   = Random.new(20260611)
+    today = Date.today
+
+    # ── Categories (global/shared) ──────────────────────────────────────
+    category_defs = {
+      'Salary'        => 'Income from work',
+      'Groceries'     => 'Food and household',
+      'Dining'        => 'Restaurants and cafes',
+      'Transport'     => 'Commute and travel',
+      'Shopping'      => 'Retail and online',
+      'Entertainment' => 'Fun and leisure',
+      'Bills'         => 'Utilities and subscriptions',
+      'Health'        => 'Medical and fitness'
+    }
+    cat = category_defs.each_with_object({}) do |(name, desc), acc|
+      acc[name] = FinanceTracker::Category.first(name:) ||
+                  FinanceTracker::Category.create(name:, description: desc)
+    end
+
+    # ── Wallets (owned by the account) — rebuilt fresh each run ──────────
+    wallet_defs = [['Cash', 'cash', 150], ['Bank Account', 'bank_account', 2800], ['E-Wallet', 'e_wallet', 320]]
+    wallets = wallet_defs.each_with_object({}) do |(name, type, bal), acc|
+      w = FinanceTracker::Wallet.first(name:, account_id: account.id)
+      unless w
+        w = FinanceTracker::Wallet.new(account_id: account.id, name:, method_type: type)
+        w.balance = bal.to_s
+        w.save_changes
+      end
+      acc[name] = w
+    end
+    wallet_ids = wallets.values.map(&:id)
+
+    # Clear any prior demo transactions in these (demo-only) wallets.
+    removed = FinanceTracker::Transaction.where(wallet_id: wallet_ids).delete
+    puts "Cleared #{removed} existing transaction(s) in demo wallets"
+
+    mk = lambda do |wallet, category, title, amount, date, note = '[demo]'|
+      FinanceTracker::Transaction.create(
+        'title' => title, 'amount' => format('%.2f', amount),
+        'transaction_date' => date, 'note' => note,
+        'wallet_id' => wallet.id, 'category_id' => category&.id
+      )
+    end
+
+    expense_templates = {
+      'Groceries'     => [['Supermarket run', 25, 80], ['Weekly groceries', 40, 120]],
+      'Dining'        => [['Lunch out', 8, 25], ['Dinner with friends', 22, 60], ['Coffee', 3, 7]],
+      'Transport'     => [['Fuel', 30, 70], ['Bus pass', 10, 30], ['Taxi ride', 8, 25]],
+      'Shopping'      => [['New clothes', 25, 120], ['Online order', 15, 90]],
+      'Entertainment' => [['Movie night', 10, 30], ['Concert', 40, 100], ['Streaming', 9, 16]],
+      'Bills'         => [['Electricity', 30, 80], ['Internet', 25, 45], ['Phone plan', 15, 35]],
+      'Health'        => [['Pharmacy', 8, 40], ['Gym membership', 20, 50]]
+    }
+    expense_cats = expense_templates.keys
+    pool = wallets.values
+    created = 0
+
+    6.downto(0) do |m|
+      month = today << m
+
+      # Monthly salary on the 1st (skip future dates).
+      salary_date = Date.new(month.year, month.month, 1)
+      if salary_date <= today
+        mk.call(wallets['Bank Account'], cat['Salary'], 'Monthly salary', 2900 + rng.rand(400), salary_date)
+        created += 1
+      end
+
+      (8 + rng.rand(6)).times do
+        cat_name = expense_cats.sample(random: rng)
+        title, lo, hi = expense_templates[cat_name].sample(random: rng)
+        day  = 1 + rng.rand(28)
+        date = Date.new(month.year, month.month, day)
+        next if date > today
+
+        amount = -(lo + rng.rand(hi - lo + 1))
+        mk.call(pool.sample(random: rng), cat[cat_name], title, amount, date)
+        created += 1
+      end
+
+      # One internal transfer per month (Bank → Cash), shown as two net-zero legs.
+      t_date = Date.new(month.year, month.month, [15, today.day].min)
+      if t_date <= today
+        mk.call(wallets['Bank Account'], nil, 'Transfer → Cash', -100, t_date, 'Transfer [demo]')
+        mk.call(wallets['Cash'],         nil, 'Transfer ← Bank Account', 100, t_date, 'Transfer [demo]')
+        created += 2
+      end
+    end
+
+    puts "Demo data ready for @#{username}: #{wallets.size} wallets, #{cat.size} categories, #{created} transactions"
+  end
 end
 
 desc 'Delete all data and reseed'
