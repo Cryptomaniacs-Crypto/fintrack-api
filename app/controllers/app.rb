@@ -157,15 +157,13 @@ module FinanceTracker
                 # that confirms which emails are registered and maps them to a
                 # username. Returns only the minimal public profile (no email/
                 # roles), so a caller can't harvest PII for arbitrary emails.
-                current_account = current_account_from_auth
-                routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+                current_account = require_auth!(routing)
                 account = FindAccountByEmail.call(email:)
                 next(account ? { data: account.public_summary }.to_json : routing.halt(404, { message: 'Account not found' }.to_json))
               end
 
               # GET api/v1/accounts  (admin-only index)
-              current_account = current_account_from_auth
-              routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+              current_account = require_auth!(routing)
               routing.halt 403, { message: 'Admins only' }.to_json unless
                 ::FinanceTracker::AccountPolicy.new(current_account, current_account, auth_scope: auth_scope).is_admin?
 
@@ -226,8 +224,7 @@ module FinanceTracker
 
               # PUT api/v1/accounts/[username] -- owner renames their handle.
               routing.put do
-                current_account = current_account_from_auth
-                routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+                current_account = require_auth!(routing)
                 scope_allows_write!(routing, 'accounts')
 
                 target = Account.first(username:)
@@ -249,8 +246,7 @@ module FinanceTracker
 
             # /api/v1/accounts/[username]/banner -- per-user home cover photo
             routing.on 'banner' do
-              current_account = current_account_from_auth
-              routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+              current_account = require_auth!(routing)
               target = Account.first(username:)
               routing.halt 404, { message: 'Account not found' }.to_json unless target
               policy = ::FinanceTracker::AccountPolicy.new(current_account, target, auth_scope: auth_scope)
@@ -292,8 +288,7 @@ module FinanceTracker
 
               # GET api/v1/accounts/[username]/roles
               routing.get do
-                current_account = current_account_from_auth
-                routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+                current_account = require_auth!(routing)
                 target = Account.first(username:)
                 routing.halt 403, { message: 'Only admins can manage system roles' }.to_json unless
                   ::FinanceTracker::SystemRolePolicy.new(current_account, target, auth_scope: auth_scope).can_manage?
@@ -346,8 +341,7 @@ module FinanceTracker
         # personal, so every route resolves the owner from the auth token.
         routing.on 'friends' do
           routing.is do
-            current_account = current_account_from_auth
-            routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+            current_account = require_auth!(routing)
 
             # GET api/v1/friends -- list the account's saved friends
             # (username + avatar only; never another user's email/PII).
@@ -374,8 +368,7 @@ module FinanceTracker
 
           # DELETE api/v1/friends/[username]
           routing.on String do |friend_username|
-            current_account = current_account_from_auth
-            routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+            current_account = require_auth!(routing)
 
             routing.delete do
               scope_allows_write!(routing, 'accounts')
@@ -389,7 +382,7 @@ module FinanceTracker
 
         routing.on 'wallets' do
           @wallet_route = "#{@api_root}/wallets"
-          routing.halt 401, { message: 'Authentication required' }.to_json unless current_account_from_auth
+          require_auth!(routing)
 
           routing.on String do |wallet_id|
             # GET api/v1/wallets/[wallet_id]
@@ -492,7 +485,7 @@ module FinanceTracker
 
         routing.on 'categories' do
           @category_route = "#{@api_root}/categories"
-          routing.halt 401, { message: 'Authentication required' }.to_json unless current_account_from_auth
+          require_auth!(routing)
 
           routing.on String do |category_id|
             # GET api/v1/categories/[category_id]
@@ -586,7 +579,7 @@ module FinanceTracker
 
         routing.on 'transactions' do
           @transaction_route = "#{@api_root}/transactions"
-          routing.halt 401, { message: 'Authentication required' }.to_json unless current_account_from_auth
+          require_auth!(routing)
 
           routing.on String do |transaction_id|
             routing.on 'wallet' do
@@ -855,8 +848,7 @@ module FinanceTracker
         end
 
         routing.on 'bill-splits' do
-          current_account = current_account_from_auth
-          routing.halt 401, { message: 'Authentication required' }.to_json unless current_account
+          current_account = require_auth!(routing)
 
           routing.is do
             # GET api/v1/bill-splits — splits where current account is creator or participant
@@ -878,9 +870,9 @@ module FinanceTracker
 
               bill = CreateBillSplit.call(
                 creator: current_account,
-                title: payload[:title] || payload['title'],
-                participant_usernames: payload[:participant_usernames] || payload['participant_usernames'],
-                note: payload[:note] || payload['note']
+                title: payload[:title],
+                participant_usernames: payload[:participant_usernames],
+                note: payload[:note]
               )
 
               response.status = 201
@@ -918,12 +910,12 @@ module FinanceTracker
                 payload = HttpRequest.new(routing).body_data
                 updated = UpdateBillSplit.call(
                   bill_split: bill,
-                  title: payload[:title] || payload['title'],
-                  tax_percent: payload[:tax_percent] || payload['tax_percent'],
-                  service_percent: payload[:service_percent] || payload['service_percent'],
-                  note: payload[:note] || payload['note'],
-                  items: payload[:items] || payload['items'],
-                  category_id: payload[:category_id] || payload['category_id']
+                  title: payload[:title],
+                  tax_percent: payload[:tax_percent],
+                  service_percent: payload[:service_percent],
+                  note: payload[:note],
+                  items: payload[:items],
+                  category_id: payload[:category_id]
                 )
                 updated.to_json
               rescue UpdateBillSplit::NotEditable => e
@@ -950,7 +942,7 @@ module FinanceTracker
               routing.halt 403, { message: 'Only the creator can send a bill split' }.to_json unless bill.creator?(current_account)
 
               payload = HttpRequest.new(routing).body_data
-              SendBillSplit.call(bill:, owner: current_account, wallet_id: payload[:wallet_id] || payload['wallet_id'])
+              SendBillSplit.call(bill:, owner: current_account, wallet_id: payload[:wallet_id])
               bill.reload
               NotifyBillSplit.call(bill: bill, app_url: ENV.fetch('APP_URL', nil))
               bill.to_json
@@ -979,7 +971,7 @@ module FinanceTracker
               routing.halt 409, { message: 'Cannot reject a paid or settled share' }.to_json if participant.paid? || participant.settled?
 
               payload = HttpRequest.new(routing).body_data
-              reason = (payload[:reason] || payload['reason']).to_s.strip
+              reason = (payload[:reason]).to_s.strip
               routing.halt 400, { message: 'Reject reason is required' }.to_json if reason.empty?
 
               participant.reject!(reason)
@@ -997,9 +989,9 @@ module FinanceTracker
               PayBillSplitShare.call(
                 bill:,
                 payer: current_account,
-                wallet_id: payload[:wallet_id] || payload['wallet_id'],
-                proof_base64: payload[:proof_base64] || payload['proof_base64'],
-                proof_content_type: payload[:proof_content_type] || payload['proof_content_type']
+                wallet_id: payload[:wallet_id],
+                proof_base64: payload[:proof_base64],
+                proof_content_type: payload[:proof_content_type]
               )
               bill.reload.to_json
             rescue PayBillSplitShare::NotAllowed => e
@@ -1017,8 +1009,8 @@ module FinanceTracker
                 routing.halt 403, { message: 'Only the creator can upload a receipt' }.to_json unless bill.creator?(current_account)
 
                 payload = HttpRequest.new(routing).body_data
-                base64  = payload[:image_base64] || payload['image_base64']
-                ctype   = payload[:content_type] || payload['content_type']
+                base64  = payload[:image_base64]
+                ctype   = payload[:content_type]
                 begin
                   validated = FinanceTracker::ImageProof.validate!(base64, ctype)
                 rescue FinanceTracker::ImageProof::InvalidImage => e
@@ -1061,7 +1053,7 @@ module FinanceTracker
                   payload = HttpRequest.new(routing).body_data
                   ConfirmBillSplitPayment.call(
                     bill:, owner: current_account, participant:,
-                    wallet_id: payload[:wallet_id] || payload['wallet_id']
+                    wallet_id: payload[:wallet_id]
                   )
                   bill.reload.to_json
                 rescue ConfirmBillSplitPayment::NotAllowed => e
@@ -1096,6 +1088,13 @@ module FinanceTracker
 
       account_id = @auth_account&.dig('attributes', 'id')
       @current_account_from_auth = account_id ? Account.first(id: account_id) : nil
+    end
+
+    # Returns the authenticated Account, or halts 401 when no valid token was
+    # presented. Use at the top of any route that requires a logged-in caller.
+    def require_auth!(routing)
+      current_account_from_auth ||
+        routing.halt(401, { message: 'Authentication required' }.to_json)
     end
 
     # The AuthScope carried by the current token (FULL when no token present).
