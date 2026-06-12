@@ -85,4 +85,67 @@ describe 'Test Wallet Handling' do
       _(last_response.headers['Location']).must_be_nil
     end
   end
+
+  describe 'Deleting Wallets' do
+    before do
+      @owner = FinanceTracker::CreateAccount.call(
+        account_data: {
+          'username' => 'wallet.deleter',
+          'email' => 'wallet.deleter@example.com',
+          'password' => 'wallet-password',
+          'avatar' => 'wallet.png'
+        }
+      )
+      @wallet = FinanceTracker::Wallet.create(
+        DATA[:wallets][0].merge(account_id: @owner.id)
+      )
+    end
+
+    it 'HAPPY: owner should be able to delete their wallet' do
+      delete "api/v1/wallets/#{@wallet.id}", nil, auth_header(@owner)
+
+      _(last_response.status).must_equal 204
+      _(FinanceTracker::Wallet.first(id: @wallet.id)).must_be_nil
+    end
+
+    it 'HAPPY: deleting a wallet also removes its transactions' do
+      transaction = FinanceTracker::Transaction.create(
+        DATA[:transactions][0].merge(wallet_id: @wallet.id)
+      )
+
+      delete "api/v1/wallets/#{@wallet.id}", nil, auth_header(@owner)
+
+      _(last_response.status).must_equal 204
+      _(FinanceTracker::Transaction.first(id: transaction.id)).must_be_nil
+    end
+
+    it 'BAD: unauthenticated request cannot delete a wallet' do
+      delete "api/v1/wallets/#{@wallet.id}"
+
+      _(last_response.status).must_equal 401
+      _(FinanceTracker::Wallet.first(id: @wallet.id)).wont_be_nil
+    end
+
+    it 'SECURITY: non-owner cannot delete another account wallet' do
+      stranger = FinanceTracker::CreateAccount.call(
+        account_data: {
+          'username' => 'wallet.stranger',
+          'email' => 'wallet.stranger@example.com',
+          'password' => 'wallet-password',
+          'avatar' => 'stranger.png'
+        }
+      )
+
+      delete "api/v1/wallets/#{@wallet.id}", nil, auth_header(stranger)
+
+      _(last_response.status).must_equal 403
+      _(FinanceTracker::Wallet.first(id: @wallet.id)).wont_be_nil
+    end
+
+    it 'SAD: deleting an unknown wallet returns 404' do
+      delete 'api/v1/wallets/does-not-exist', nil, auth_header(@owner)
+
+      _(last_response.status).must_equal 404
+    end
+  end
 end

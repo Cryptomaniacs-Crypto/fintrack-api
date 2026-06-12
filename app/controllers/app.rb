@@ -432,6 +432,25 @@ module FinanceTracker
               Api.logger.error "PATCH WALLET ERROR: #{e.message}"
               routing.halt 500, { message: e.message }.to_json
             end
+
+            # DELETE api/v1/wallets/[wallet_id]
+            routing.delete do
+              current_account = current_account_from_auth
+              scope_allows_write!(routing, 'wallets')
+
+              wallet = Wallet.first(id: wallet_id)
+              routing.halt 404, { message: 'Wallet not found' }.to_json unless wallet
+
+              policy = ::FinanceTracker::WalletPolicy.new(current_account, wallet, auth_scope: auth_scope)
+              routing.halt 403, { message: 'Not authorized' }.to_json unless policy.can_delete?
+
+              wallet.destroy
+              response.status = 204
+              nil
+            rescue StandardError => e
+              Api.logger.error "DELETE WALLET ERROR: #{e.message}"
+              routing.halt 500, { message: e.message }.to_json
+            end
           end
 
           # GET api/v1/wallets

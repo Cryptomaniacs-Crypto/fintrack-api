@@ -9,7 +9,7 @@ module FinanceTracker
   class Wallet < Sequel::Model
     many_to_one :account
     one_to_many :transactions
-    plugin :association_dependencies, transactions: :nullify
+    plugin :association_dependencies, transactions: :delete
 
     plugin :uuid, field: :id
     plugin :timestamps
