@@ -8,7 +8,7 @@ module FinanceTracker
   # since the bill was sent (or since the last reminder). Safe to call daily —
   # the 3-day gate is enforced here, not in the scheduler.
   class RemindBillSplit
-    THREE_DAYS_SECS = 60 # 1 hour for testing (change back to 3 * 24 * 60 * 60) #ubah
+    THREE_DAYS_SECS = 3 * 24 * 60 * 60 # 1 hour for testing (change back to 3 * 24 * 60 * 60) #ubah
     
 
     def self.call
