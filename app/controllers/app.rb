@@ -38,6 +38,7 @@ require_relative '../services/send_bill_split'
 require_relative '../services/notify_bill_split'
 require_relative '../services/pay_bill_split_share'
 require_relative '../services/confirm_bill_split_payment'
+require_relative '../services/create_transfer'
 require_relative '../policies/account_policy'
 require_relative '../policies/account_scope'
 require_relative '../policies/category_policy'
@@ -845,6 +846,43 @@ module FinanceTracker
             routing.halt 500, { message: 'Unknown server error' }.to_json
           end
 
+        end
+
+        # POST api/v1/transfers — atomic move between two of the caller's wallets.
+        # Both legs (source expense + destination income) commit together or not
+        # at all, so a partial transfer can never be observed.
+        routing.is 'transfers' do
+          routing.post do
+            current_account = require_auth!(routing)
+            scope_allows_write!(routing, 'transactions')
+            data = HttpRequest.new(routing).body_data
+
+            legs = CreateTransfer.call(
+              account: current_account,
+              from_wallet_id: data['wallet_id'] || data[:wallet_id],
+              to_wallet_id: data['to_wallet_id'] || data[:to_wallet_id],
+              amount: data['amount'] || data[:amount],
+              title: data['title'] || data[:title],
+              transaction_date: data['transaction_date'] || data[:transaction_date],
+              note: data['note'] || data[:note]
+            )
+
+            response.status = 201
+            {
+              message: 'Transfer recorded',
+              data: {
+                from: JSON.parse(legs[:from].to_json),
+                to: JSON.parse(legs[:to].to_json)
+              }
+            }.to_json
+          rescue CreateTransfer::InvalidInput => e
+            routing.halt 422, { message: e.message }.to_json
+          rescue Sequel::ForeignKeyConstraintViolation
+            routing.halt 404, { message: 'Wallet not found' }.to_json
+          rescue StandardError => e
+            Api.logger.error "TRANSFER ERROR: #{e.message}"
+            routing.halt 500, { message: 'Unknown server error' }.to_json
+          end
         end
 
         routing.on 'bill-splits' do
